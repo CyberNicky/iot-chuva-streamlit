@@ -6,7 +6,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY dashboard_web.py .
-COPY ia_model.py .
+COPY modelo_chuva.pkl .
 
 EXPOSE 8501
 

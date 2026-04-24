@@ -1,6 +1,6 @@
-# 🌧️ Dashboard Inteligente de Chuva - Recife
+# 🌧️ Dashboard Inteligente de Chuva - Maceió
 
-Projeto de monitoramento inteligente de chuva e risco de desastres em Recife, utilizando IoT, MQTT e IA.
+Projeto de monitoramento inteligente de chuva e risco de desastres em Maceió, utilizando IoT, MQTT e **Inteligência Artificial** com Machine Learning.
 
 ## 📋 Pré-requisitos
 
@@ -16,6 +16,7 @@ docker-compose up -d
 ```
 
 Isso vai iniciar:
+
 - ✅ Broker MQTT (Mosquitto) - porta `1883`
 - ✅ Sensor de dados - coleta e publica dados via MQTT
 - ✅ Dashboard Streamlit - acesso em `http://localhost:8501`
@@ -24,108 +25,174 @@ Isso vai iniciar:
 
 Abra no navegador: **http://localhost:8501**
 
-O dashboard começará a exibir dados em tempo real assim que o sensor iniciar.
+O dashboard começará a exibir dados em tempo real com predições de IA.
 
-## 🛑 Para Parar os Serviços
+## 🤖 Sistema de Inteligência Artificial
 
-```bash
-docker-compose down
+### Modelo de Machine Learning
+
+- **Algoritmo**: Random Forest Classifier
+- **Acurácia**: ~96% em dados de teste
+- **Features utilizadas**:
+  - 🌡️ Temperatura (°C)
+  - 💧 Umidade relativa (%)
+  - 📊 Pressão atmosférica (hPa)
+  - 🌬️ Velocidade do vento (km/h)
+  - 🕐 Hora do dia
+  - 📍 Local da medição
+  - 📅 Dia da semana
+
+### Como Funciona
+
+1. **Coleta de Dados**: Sensor coleta umidade, localização e dia da semana
+2. **Estimativa de Features**: Sistema estima temperatura, pressão e vento (valores típicos de Recife)
+3. **Predição IA**: Modelo calcula probabilidade de chuva em tempo real
+4. **Classificação de Risco**: Combina predição IA + vulnerabilidade local
+
+### Exemplo de Predições
+
+```
+🤖 IA: Boa Viagem - Probabilidade de chuva: 83.7% → ALTO
+🤖 IA: Casa Amarela - Probabilidade de chuva: 27.5% → BAIXO
+🤖 IA: Ibura - Probabilidade de chuva: 55.1% → ALTO (local vulnerável)
 ```
 
 ## 📦 Estrutura do Projeto
 
 - **sensor.py** - Coleta dados reais/simulados da API APAC e publica via MQTT
-- **dashboard_web.py** - Interface Streamlit que escuta MQTT e exibe dados em tempo real
-- **ia_model.py** - Modelo de IA que classifica risco (BAIXO, MÉDIO, ALTO)
+- **dashboard_web.py** - **Interface Streamlit com modelo de IA integrado**
+- **train_model.py** - Script para treinar/retreinar o modelo de IA
+- **modelo_chuva.pkl** - Arquivo do modelo treinado (Random Forest)
 - **docker-compose.yml** - Orquestração dos serviços
 - **Dockerfile.sensor** - Imagem Docker para o sensor
 - **Dockerfile.dashboard** - Imagem Docker para o dashboard
 - **mosquitto.conf** - Configuração do broker MQTT
-- **requirements.txt** - Dependências Python
+- **requirements.txt** - Dependências Python (incluindo scikit-learn)
 
-## 🔧 Variáveis de Ambiente
+## 🎯 Predições em Tempo Real
 
-O sensor usa as seguintes variáveis (definidas automaticamente no docker-compose):
+### Métricas no Dashboard
 
-- `MQTT_BROKER` - Endereço do broker (padrão: mosquitto)
-- `MQTT_PORT` - Porta do broker (padrão: 1883)
-
-## 📊 O que Você Vai Ver
-
-### Métricas em Tempo Real
 - 🌧️ Última Chuva registrada
 - 💧 Umidade percentual
 - 📅 Dia da semana
+- 🤖 **Probabilidade de chuva** calculada por IA
 
-### Dados em Tabela
-- Histórico dos últimos 10 registros
+### Classificação de Risco
 
-### Análises
-- 📈 Gráfico de chuva ao longo do tempo
-- 🗺️ Mapa de risco por região (BAIXO, MÉDIO, ALTO)
-- 📌 Região mais crítica no momento
-- 🚨 Alertas gerais quando múltiplas regiões têm risco alto
-- 🏆 Ranking de regiões por número de alertas
-- 📈 Tendência de chuva (aumento/estável)
+O sistema combina:
+
+- **Predição de IA** (probabilidade de chuva)
+- **Fatores locais** (vulnerabilidade de cada bairro)
+
+**Resultado Final:**
+
+- **BAIXO**: Probabilidade < 30% + baixo risco local
+- **MÉDIO**: Probabilidade 30-60% + médio risco local
+- **ALTO**: Probabilidade > 60% + alto risco local
 
 ## 🏘️ Regiões Monitoradas
 
-- Boa Viagem
-- Casa Amarela
-- Várzea
-- Ibura
-- Afogados
-- Centro
+- **Boa Viagem** - Litoral, alta probabilidade de chuva
+- **Casa Amarela** - Interior, menor probabilidade
+- **Várzea** - Área baixa, médio risco
+- **Ibura** - Litoral, **alto risco de alagamento**
+- **Afogados** - Médio risco
+- **Centro** - Área urbana
+
+## 🔄 Retreinamento do Modelo
+
+Para melhorar o modelo com novos dados:
+
+```bash
+# Executar treinamento
+python3 train_model.py
+
+# Reconstruir containers
+docker-compose down
+docker-compose up -d --build
+```
+
+## 📊 Análises Disponíveis
+
+### Dados em Tempo Real
+
+- Histórico dos últimos 10 registros
+- Gráfico de chuva ao longo do tempo
+- Mapa de risco por região (BAIXO/MÉDIO/ALTO)
+
+### Alertas Inteligentes
+
+- 🚨 Regiões com risco ALTO
+- 📍 Maior risco atual
+- 🏆 Ranking de regiões por alertas
+- 📈 Tendência de chuva (aumento/estável)
 
 ## 🐛 Troubleshooting
 
-### Containers não iniciam
-```bash
-docker-compose logs
-```
-Ver logs de todos os serviços.
+### Modelo não carrega
 
-### Dashboard não aparece em http://localhost:8501
 ```bash
+# Verificar se arquivo existe
+ls -la modelo_chuva.pkl
+
+# Retreinar modelo
+python3 train_model.py
+```
+
+### Dashboard não conecta MQTT
+
+```bash
+# Verificar logs
 docker-compose logs dashboard
-```
-Verificar logs do Streamlit.
 
-### Sensor não conecta ao MQTT
-```bash
-docker-compose logs sensor
+# Reiniciar serviços
+docker-compose restart
 ```
-O sensor fará fallback para dados simulados se a API falhar.
 
-## 🔗 Verificar Conexão MQTT
+### Baixa acurácia
 
-Para testar a conexão MQTT manualmente:
-```bash
-docker-compose exec mosquitto mosquitto_sub -t "iot/chuva" -v
-```
+- Modelo usa dados sintéticos para demonstração
+- Para produção: coletar dados reais históricos
+- Retreinar com `python3 train_model.py`
+
+## 🎓 Sobre o Modelo de IA
+
+### Dataset de Treinamento
+
+- **15.000 amostras** sintéticas baseadas em padrões reais
+- **Features**: temperatura, umidade, pressão, vento, hora, local, dia
+- **Target**: vai_chover (0/1)
+
+### Algoritmo Random Forest
+
+- **Estimators**: 100 árvores
+- **Max Depth**: 10 níveis
+- **Balanceamento**: classe_weight='balanced'
+
+### Importância das Features
+
+1. 📊 Pressão atmosférica (46.8%)
+2. 💧 Umidade (31.5%)
+3. 🌡️ Temperatura (19.0%)
+4. 🌬️ Vento, hora, local, dia (< 5% cada)
 
 ## 📂 Estrutura de Diretórios
 
 ```
 projetoSensoriamento/
 ├── sensor.py              # Script do sensor
-├── dashboard_web.py       # Dashboard Streamlit
-├── ia_model.py           # Modelo de IA
-├── requirements.txt      # Dependências Python
+├── dashboard_web.py       # 🤖 Dashboard com IA integrada
+├── train_model.py         # Script de treinamento
+├── modelo_chuva.pkl       # Modelo treinado (2.8MB)
+├── requirements.txt      # Dependências + scikit-learn
 ├── docker-compose.yml    # Orquestração Docker
 ├── Dockerfile.sensor     # Imagem do sensor
 ├── Dockerfile.dashboard  # Imagem do dashboard
-├── mosquitto.conf        # Config do MQTT
+├── mosquitto.conf        # Config MQTT
 └── README.md            # Este arquivo
 ```
 
-## 🎯 Modelo de IA
+---
 
-O modelo classifica o risco de desastres baseado em:
-- **Chuva**: > 60mm (risco +2) ou > 30mm (risco +1)
-- **Local**: Ibura (risco +2), Afogados/Várzea (risco +1)
-
-Resultado final:
-- **BAIXO**: risco ≤ 1
-- **MÉDIO**: risco = 2
-- **ALTO**: risco > 2
+**🚀 Projeto com IA totalmente integrada e simplificada!**

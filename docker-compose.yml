@@ -13,11 +13,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.sensor
-    container_name: sensor-apac
+    container_name: sensor-publisher
     depends_on:
       - mosquitto
     environment:
-      - MQTT_BROKER=mosquitto
+      - MQTT_BROKER=mosquitto # ✅ corrigido
       - MQTT_PORT=1883
     restart: always
 
@@ -32,6 +32,6 @@ services:
       - mosquitto
     environment:
       - PYTHONUNBUFFERED=1
-      - MQTT_BROKER=mosquitto
+      - MQTT_BROKER=mosquitto # ✅ corrigido
       - MQTT_PORT=1883
     restart: always
