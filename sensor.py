@@ -16,21 +16,25 @@ TOPIC = "iot/chuva"
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 TIMEZONE = "America/Sao_Paulo"
 
-INTERVALO_API = 60  # 🔥 1 minuto (evita bloqueio)
-INTERVALO_ENVIO = 10  # envia pro MQTT mais rápido
-
-ultimo_dado = None
-ultimo_request = 0
+INTERVALO_API = 60  # 🔥 agora controla tudo
 
 # 📍 Bairros
 BAIRROS_COORDS = {
-    "Ponta Verde": (-9.659, -35.700),
-    "Pajuçara": (-9.665, -35.715),
-    "Jatiúca": (-9.655, -35.705),
-    "Farol": (-9.655, -35.735),
-    "Benedito Bentes": (-9.590, -35.750),
+    "Ponta Verde": (-9.6616, -35.7052),
+    "Pajuçara": (-9.6682, -35.7141),
+    "Jatiúca": (-9.6545, -35.7040),
+    "Farol": (-9.6480, -35.7350),
     "Centro": (-9.6658, -35.7353),
-    
+    "Mangabeiras": (-9.6485, -35.6905),
+    "Cruz das Almas": (-9.6335, -35.6880),
+    "Jacintinho": (-9.6280, -35.7355),
+    "Serraria": (-9.5950, -35.7400),
+    "Tabuleiro do Martins": (-9.5650, -35.7800),
+    "Benedito Bentes": (-9.5900, -35.7500),
+    "Gruta de Lourdes": (-9.6200, -35.7300),
+    "Feitosa": (-9.6205, -35.7450),
+    "Jaraguá": (-9.6685, -35.7350),
+    "Poço": (-9.6600, -35.7300),
 }
 
 # ----------------------------
@@ -54,15 +58,6 @@ else:
 # API
 # ----------------------------
 def obter_dados():
-    global ultimo_dado, ultimo_request
-
-    agora = time.time()
-
-    # 🔥 usa cache se ainda não deu tempo
-    if ultimo_dado and (agora - ultimo_request < INTERVALO_API):
-        print("♻️ Usando cache da API")
-        return ultimo_dado
-
     try:
         bairro = random.choice(list(BAIRROS_COORDS.keys()))
         lat, lon = BAIRROS_COORDS[bairro]
@@ -90,7 +85,7 @@ def obter_dados():
                 idx = i
                 break
 
-        dado = {
+        return {
             "temperatura": float(hourly["temperature_2m"][idx]),
             "umidade": float(hourly["relativehumidity_2m"][idx]),
             "pressao": float(hourly["pressure_msl"][idx]),
@@ -101,39 +96,18 @@ def obter_dados():
             "hora": datetime.now().hour
         }
 
-        print("🌤️ API OK")
-
-        ultimo_dado = dado
-        ultimo_request = agora
-
-        return dado
-
     except Exception as e:
         print("❌ API falhou:", e)
-
-        # fallback simples
-        if ultimo_dado:
-            print("♻️ Usando último dado válido")
-            return ultimo_dado
-
-        return {
-            "temperatura": random.uniform(20, 35),
-            "umidade": random.randint(50, 100),
-            "pressao": random.uniform(1000, 1020),
-            "vento_velocidade": random.uniform(0, 20),
-            "chuva": random.uniform(0, 100),
-            "local": "Simulado",
-            "dia_semana": datetime.now().strftime("%A"),
-            "hora": datetime.now().hour
-        }
+        return None
 
 # ----------------------------
-# LOOP
+# LOOP REAL
 # ----------------------------
 while True:
     dados = obter_dados()
 
-    client.publish(TOPIC, json.dumps(dados))
-    print("[SENSOR]", dados)
+    if dados:
+        client.publish(TOPIC, json.dumps(dados))
+        print("[SENSOR]", dados)
 
-    time.sleep(INTERVALO_ENVIO)
+    time.sleep(INTERVALO_API)  # 🔥 envia só quando atualiza

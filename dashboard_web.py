@@ -3,8 +3,6 @@ import streamlit as st
 import paho.mqtt.client as mqtt
 import json
 import pandas as pd
-import numpy as np
-import joblib
 import os
 from datetime import datetime
 
@@ -57,69 +55,7 @@ def on_message(client, userdata, msg):
     except Exception as e:
         print("Erro no callback MQTT:", e)
 
-# ----------------------------
-# MODELO DE IA
-# ----------------------------
 
-def carregar_modelo():
-    try:
-        return joblib.load("modelo_chuva.pkl")
-    except Exception as e:
-        print("⚠️ Não foi possível carregar o modelo:", e)
-        return None
-
-
-def mapear_dia_semana(dia):
-    mapa = {
-        "Monday": 0,
-        "Tuesday": 1,
-        "Wednesday": 2,
-        "Thursday": 3,
-        "Friday": 4,
-        "Saturday": 5,
-        "Sunday": 6,
-    }
-    return mapa.get(str(dia).strip().capitalize(), 0)
-
-
-def calcular_features_registro(registro, historico):
-    ultima_pressao = historico[-1]["Pressao"] if historico else registro["pressao"]
-    ultima_chuva = historico[-1]["Chuva"] if historico else registro["chuva"]
-    umidades = [item["Umidade"] for item in historico[-2:]] if historico else []
-    umidades.append(registro["umidade"])
-
-    chuva_ultimas_3h = sum([item["Chuva"] for item in historico[-2:]]) + registro["chuva"] if historico else registro["chuva"]
-    media_umidade_3h = sum(umidades) / max(1, len(umidades))
-
-    hora = registro["hora"]
-    return {
-        "temperatura": registro["temp"],
-        "umidade": registro["umidade"],
-        "pressao": registro["pressao"],
-        "vento_velocidade": registro["vento"],
-        "hora": hora,
-        "dia_semana": mapear_dia_semana(registro["dia_semana"]),
-        "delta_pressao": registro["pressao"] - ultima_pressao,
-        "media_umidade_3h": media_umidade_3h,
-        "chuva_ultimas_3h": chuva_ultimas_3h,
-        "hora_sin": np.sin(2 * np.pi * hora / 24),
-        "hora_cos": np.cos(2 * np.pi * hora / 24),
-        "tendencia_chuva": registro["chuva"] - ultima_chuva,
-    }
-
-
-def prever_probabilidade(registro, historico, modelo):
-    if not modelo:
-        return 0.0
-
-    features = calcular_features_registro(registro, historico)
-    X = pd.DataFrame([features])
-    try:
-        prob = modelo.predict_proba(X)[0][1] * 100
-        return round(prob, 1)
-    except Exception as e:
-        print("Erro ao prever probabilidade:", e)
-        return 0.0
 
 # ----------------------------
 # MQTT (UMA VEZ)
@@ -147,40 +83,18 @@ conectar()
 # ----------------------------
 # PROCESSAR BUFFER
 # ----------------------------
-modelo_data = carregar_modelo()
-modelo = modelo_data["modelo"] if modelo_data else None
-
 if message_buffer:
     for d in list(message_buffer):
-        registro = {
-            "local": d["local"],
-            "chuva": d["chuva"],
-            "umidade": d["umidade"],
-            "temp": d["temp"],
-            "pressao": d["pressao"],
-            "vento": d["vento"],
-            "hora": d["hora"],
-            "dia_semana": d.get("dia_semana", "Monday"),
-            "timestamp": d["timestamp"],
-            "raw": d["raw"],
-        }
-        prob = prever_probabilidade(registro, st.session_state.data, modelo)
-
         st.session_state.data.append({
-            "Data/Hora": registro["timestamp"],
-            "Local": registro["local"],
-            "Chuva": registro["chuva"],
-            "Umidade": registro["umidade"],
-            "Pressao": registro["pressao"],
-            "Temperatura": registro["temp"],
-            "Chuva (mm)": registro["chuva"],
-            "Umidade (%)": registro["umidade"],
-            "Temperatura (°C)": registro["temp"],
-            "Pressão (hPa)": registro["pressao"],
-            "Vento (km/h)": registro["vento"],
-            "Probabilidade de chuva (%)": prob,
-            "Dia da semana": registro["dia_semana"],
-            "Dados brutos": registro["raw"],
+            "Data/Hora": d["timestamp"],
+            "Local": d["local"],
+            "Temperatura (°C)": d["temp"],
+            "Umidade (%)": d["umidade"],
+            "Pressão (hPa)": d["pressao"],
+            "Chuva (mm)": d["chuva"],
+            "Vento (km/h)": d["vento"],
+            "Dia da semana": d["dia_semana"],
+            "Dados brutos": d["raw"],
         })
 
     if len(st.session_state.data) > 500:
@@ -206,11 +120,10 @@ if len(st.session_state.data) > 0:
     cols[3].metric("💨 Vento", f"{latest['Vento (km/h)']:.1f} km/h")
 
     cols2 = st.columns(4)
-    cols2[0].metric("📈 Prob. chuva", f"{latest['Probabilidade de chuva (%)']:.1f}%")
-    cols2[1].metric("📍 Local", latest["Local"])
-    cols2[2].metric("🕒 Última leitura", latest["Data/Hora"].strftime("%d/%m %H:%M"))
-    cols2[3].metric("📅 Dia", latest["Dia da semana"])
-
+    cols2[0].metric("📍 Local", latest["Local"])
+    cols2[1].metric("🕒 Última leitura", latest["Data/Hora"].strftime("%d/%m %H:%M"))
+    cols2[2].metric("📅 Dia", latest["Dia da semana"])
+    cols2[3].metric("📊 Pressão", f"{latest['Pressão (hPa)']:.1f} hPa")
     st.markdown("---")
     st.subheader("Tendências recentes")
     trend_left, trend_right = st.columns(2)
@@ -239,4 +152,4 @@ else:
 # AUTO REFRESH
 # ----------------------------
 sleep(2)
-st.experimental_rerun()
+st.rerun()
