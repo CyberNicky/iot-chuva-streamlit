@@ -17,8 +17,13 @@ services:
     depends_on:
       - mosquitto
     environment:
-      - MQTT_BROKER=mosquitto # ✅ corrigido
+      - PYTHONUNBUFFERED=1
+      - APP_TIMEZONE=America/Maceio
+      - MQTT_BROKER=mosquitto
       - MQTT_PORT=1883
+      - MQTT_TOPIC=iot/chuva
+      - MQTT_RETAIN=true
+      - PUBLISH_INTERVAL_SECONDS=15
     restart: always
 
   dashboard:
@@ -32,6 +37,8 @@ services:
       - mosquitto
     environment:
       - PYTHONUNBUFFERED=1
-      - MQTT_BROKER=mosquitto # ✅ corrigido
+      - APP_TIMEZONE=America/Maceio
+      - MQTT_BROKER=mosquitto
       - MQTT_PORT=1883
+      - MQTT_TOPIC=iot/chuva
     restart: always

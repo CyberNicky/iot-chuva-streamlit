@@ -1,198 +1,135 @@
-# 🌧️ Dashboard Inteligente de Chuva - Maceió
+# Dashboard de Chuva - Maceió
 
-Projeto de monitoramento inteligente de chuva e risco de desastres em Maceió, utilizando IoT, MQTT e **Inteligência Artificial** com Machine Learning.
+Projeto de monitoramento de clima em Maceió usando Open-Meteo, MQTT, Mosquitto e Streamlit.
 
-## 📋 Pré-requisitos
+## O que o projeto faz
 
-- Docker e Docker Compose instalados
-- Nenhuma outra dependência necessária!
+1. `sensor.py` escolhe um bairro de Maceió e consulta dados climáticos na API Open-Meteo.
+2. O sensor publica a leitura no tópico MQTT `iot/chuva`.
+3. `dashboard_web.py` recebe as leituras e mostra métricas, gráficos e histórico recente em uma página web.
 
-## 🚀 Como Rodar com Docker
+## Pré-requisitos
 
-### 1. Inicie todos os serviços
+- Docker instalado e aberto.
+- Docker Compose disponível no terminal.
+- Porta `8501` livre para acessar o dashboard.
 
-```bash
-docker-compose up -d
-```
+## Como rodar com Docker
 
-Isso vai iniciar:
-
-- ✅ Broker MQTT (Mosquitto) - porta `1883`
-- ✅ Sensor de dados - coleta e publica dados via MQTT
-- ✅ Dashboard Streamlit - acesso em `http://localhost:8501`
-
-### 2. Acesse o Dashboard
-
-Abra no navegador: **http://localhost:8501**
-
-O dashboard começará a exibir dados em tempo real com predições de IA.
-
-## 🤖 Sistema de Inteligência Artificial
-
-### Modelo de Machine Learning
-
-- **Algoritmo**: Random Forest Classifier
-- **Acurácia**: ~96% em dados de teste
-- **Features utilizadas**:
-  - 🌡️ Temperatura (°C)
-  - 💧 Umidade relativa (%)
-  - 📊 Pressão atmosférica (hPa)
-  - 🌬️ Velocidade do vento (km/h)
-  - 🕐 Hora do dia
-  - 📍 Local da medição
-  - 📅 Dia da semana
-
-### Como Funciona
-
-1. **Coleta de Dados**: Sensor coleta umidade, localização e dia da semana
-2. **Estimativa de Features**: Sistema estima temperatura, pressão e vento (valores típicos de Recife)
-3. **Predição IA**: Modelo calcula probabilidade de chuva em tempo real
-4. **Classificação de Risco**: Combina predição IA + vulnerabilidade local
-
-### Exemplo de Predições
-
-```
-🤖 IA: Boa Viagem - Probabilidade de chuva: 83.7% → ALTO
-🤖 IA: Casa Amarela - Probabilidade de chuva: 27.5% → BAIXO
-🤖 IA: Ibura - Probabilidade de chuva: 55.1% → ALTO (local vulnerável)
-```
-
-## 📦 Estrutura do Projeto
-
-- **sensor.py** - Coleta dados reais/simulados da API APAC e publica via MQTT
-- **dashboard_web.py** - **Interface Streamlit com modelo de IA integrado**
-- **train_model.py** - Script para treinar/retreinar o modelo de IA
-- **modelo_chuva.pkl** - Arquivo do modelo treinado (Random Forest)
-- **docker-compose.yml** - Orquestração dos serviços
-- **Dockerfile.sensor** - Imagem Docker para o sensor
-- **Dockerfile.dashboard** - Imagem Docker para o dashboard
-- **mosquitto.conf** - Configuração do broker MQTT
-- **requirements.txt** - Dependências Python (incluindo scikit-learn)
-
-## 🎯 Predições em Tempo Real
-
-### Métricas no Dashboard
-
-- 🌧️ Última Chuva registrada
-- 💧 Umidade percentual
-- 📅 Dia da semana
-- 🤖 **Probabilidade de chuva** calculada por IA
-
-### Classificação de Risco
-
-O sistema combina:
-
-- **Predição de IA** (probabilidade de chuva)
-- **Fatores locais** (vulnerabilidade de cada bairro)
-
-**Resultado Final:**
-
-- **BAIXO**: Probabilidade < 30% + baixo risco local
-- **MÉDIO**: Probabilidade 30-60% + médio risco local
-- **ALTO**: Probabilidade > 60% + alto risco local
-
-## 🏘️ Regiões Monitoradas
-
-- **Boa Viagem** - Litoral, alta probabilidade de chuva
-- **Casa Amarela** - Interior, menor probabilidade
-- **Várzea** - Área baixa, médio risco
-- **Ibura** - Litoral, **alto risco de alagamento**
-- **Afogados** - Médio risco
-- **Centro** - Área urbana
-
-## 🔄 Retreinamento do Modelo
-
-Para melhorar o modelo com novos dados:
+### 1. Entre na pasta do projeto
 
 ```bash
-# Executar treinamento
-python3 train_model.py
+cd /Users/monique/Documents/projetoSensoriamento
+```
 
-# Reconstruir containers
-docker-compose down
+### 2. Suba todos os serviços
+
+```bash
 docker-compose up -d --build
 ```
 
-## 📊 Análises Disponíveis
+Esse comando inicia:
 
-### Dados em Tempo Real
+- Mosquitto, o broker MQTT.
+- Sensor, que consulta a Open-Meteo e publica dados a cada 15 segundos.
+- Dashboard Streamlit, que exibe os dados na web.
 
-- Histórico dos últimos 10 registros
-- Gráfico de chuva ao longo do tempo
-- Mapa de risco por região (BAIXO/MÉDIO/ALTO)
-
-### Alertas Inteligentes
-
-- 🚨 Regiões com risco ALTO
-- 📍 Maior risco atual
-- 🏆 Ranking de regiões por alertas
-- 📈 Tendência de chuva (aumento/estável)
-
-## 🐛 Troubleshooting
-
-### Modelo não carrega
+### 3. Confira se está tudo rodando
 
 ```bash
-# Verificar se arquivo existe
-ls -la modelo_chuva.pkl
-
-# Retreinar modelo
-python3 train_model.py
+docker-compose ps
 ```
 
-### Dashboard não conecta MQTT
+Os serviços `mosquitto`, `sensor` e `dashboard` devem aparecer como `Up`.
+
+### 4. Abra o dashboard no navegador
+
+Acesse:
+
+```text
+http://localhost:8501
+```
+
+Se a página já estiver aberta, recarregue a aba depois de subir os containers.
+
+### 5. Acompanhe os logs
 
 ```bash
-# Verificar logs
-docker-compose logs dashboard
-
-# Reiniciar serviços
-docker-compose restart
+docker-compose logs -f sensor dashboard
 ```
 
-### Baixa acurácia
+Você deve ver mensagens parecidas com:
 
-- Modelo usa dados sintéticos para demonstração
-- Para produção: coletar dados reais históricos
-- Retreinar com `python3 train_model.py`
-
-## 🎓 Sobre o Modelo de IA
-
-### Dataset de Treinamento
-
-- **15.000 amostras** sintéticas baseadas em padrões reais
-- **Features**: temperatura, umidade, pressão, vento, hora, local, dia
-- **Target**: vai_chover (0/1)
-
-### Algoritmo Random Forest
-
-- **Estimators**: 100 árvores
-- **Max Depth**: 10 níveis
-- **Balanceamento**: classe_weight='balanced'
-
-### Importância das Features
-
-1. 📊 Pressão atmosférica (46.8%)
-2. 💧 Umidade (31.5%)
-3. 🌡️ Temperatura (19.0%)
-4. 🌬️ Vento, hora, local, dia (< 5% cada)
-
-## 📂 Estrutura de Diretórios
-
+```text
+[SENSOR] {"temperatura": 27.3, "umidade": 70.0, ...}
+Mensagem MQTT recebida: {'local': 'Ponta Verde', ...}
 ```
+
+### 6. Pare o projeto quando terminar
+
+```bash
+docker-compose down
+```
+
+## Endereços usados
+
+| Serviço | Endereço |
+| --- | --- |
+| Dashboard web | `http://localhost:8501` |
+| MQTT | `localhost:1883` |
+| MQTT WebSocket | `localhost:9001` |
+
+## Variáveis de ambiente
+
+| Variável | Padrão | Uso |
+| --- | --- | --- |
+| `APP_TIMEZONE` | `America/Maceio` | Fuso horário usado nos timestamps exibidos |
+| `MQTT_BROKER` | `mosquitto` no Docker | Host do broker MQTT |
+| `MQTT_PORT` | `1883` | Porta MQTT |
+| `MQTT_TOPIC` | `iot/chuva` | Tópico usado para publicar e assinar leituras |
+| `MQTT_RETAIN` | `true` | Mantém a última leitura no broker para o dashboard carregar imediatamente |
+| `PUBLISH_INTERVAL_SECONDS` | `15` no Docker Compose | Intervalo de publicação do sensor |
+
+## Rodar sem Docker
+
+Use esta opção apenas se você já tiver um broker MQTT rodando localmente.
+
+### 1. Instale as dependências
+
+```bash
+python3 -m pip install -r requirements.txt
+```
+
+### 2. Execute o sensor
+
+```bash
+MQTT_BROKER=localhost python3 sensor.py
+```
+
+### 3. Execute o dashboard
+
+Em outro terminal:
+
+```bash
+MQTT_BROKER=localhost streamlit run dashboard_web.py
+```
+
+Depois abra:
+
+```text
+http://localhost:8501
+```
+
+## Estrutura
+
+```text
 projetoSensoriamento/
-├── sensor.py              # Script do sensor
-├── dashboard_web.py       # 🤖 Dashboard com IA integrada
-├── train_model.py         # Script de treinamento
-├── modelo_chuva.pkl       # Modelo treinado (2.8MB)
-├── requirements.txt      # Dependências + scikit-learn
-├── docker-compose.yml    # Orquestração Docker
-├── Dockerfile.sensor     # Imagem do sensor
-├── Dockerfile.dashboard  # Imagem do dashboard
-├── mosquitto.conf        # Config MQTT
-└── README.md            # Este arquivo
+├── dashboard_web.py       # Dashboard Streamlit
+├── sensor.py              # Coletor Open-Meteo e publicador MQTT
+├── docker-compose.yml     # Orquestração dos serviços
+├── Dockerfile.dashboard   # Imagem do dashboard
+├── Dockerfile.sensor      # Imagem do sensor
+├── mosquitto.conf         # Configuração do broker MQTT
+├── requirements.txt       # Dependências Python
+└── README.md
 ```
-
----
-
-**🚀 Projeto com IA totalmente integrada e simplificada!**
