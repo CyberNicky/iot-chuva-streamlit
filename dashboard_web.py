@@ -14,6 +14,8 @@ import pandas as pd
 import paho.mqtt.client as mqtt
 import streamlit as st
 
+from neighborhoods import NEIGHBORHOODS
+
 
 MQTT_BROKER = os.getenv("MQTT_BROKER", "mqtt-broker")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
@@ -35,6 +37,7 @@ TABLE_COLUMNS = [
     "Vento (km/h)",
     "Dia da semana",
 ]
+ALL_NEIGHBORHOODS_OPTION = "Todos os bairros"
 
 DATA_COLUMNS = {
     "timestamp": "Data/Hora",
@@ -152,6 +155,91 @@ def build_dataframe(rows: List[Dict[str, Any]]) -> pd.DataFrame:
     return dataframe.dropna(subset=["Data/Hora"]).sort_values("Data/Hora")
 
 
+def render_filters(dataframe: pd.DataFrame) -> pd.DataFrame:
+    received_neighborhoods = set(dataframe["Local"])
+    options = [ALL_NEIGHBORHOODS_OPTION] + sorted(NEIGHBORHOODS)
+
+    selected_neighborhood = st.selectbox(
+        "🏙️ Filtrar por bairro",
+        options,
+        index=0,
+        help="Escolha um bairro para ver métricas, gráficos e histórico apenas dele.",
+    )
+
+    if selected_neighborhood == ALL_NEIGHBORHOODS_OPTION:
+        st.caption(f"Exibindo todos os bairros com dados recebidos ({len(received_neighborhoods)} bairros).")
+        return dataframe
+
+    filtered = dataframe[dataframe["Local"] == selected_neighborhood]
+    st.caption(f"Exibindo somente leituras de {selected_neighborhood}.")
+    return filtered
+
+
+def classify_conditions(latest: pd.Series, recent: pd.DataFrame) -> Dict[str, str]:
+    rain_sum = float(recent["Chuva (mm)"].sum())
+    max_wind = float(recent["Vento (km/h)"].max())
+    humidity = float(latest["Umidade (%)"])
+
+    if rain_sum >= 3 or max_wind >= 45:
+        return {
+            "status": "Alerta",
+            "icon": "🚨",
+            "message": "Acompanhe os próximos registros com atenção.",
+        }
+
+    if rain_sum > 0 or humidity >= 80:
+        return {
+            "status": "Atenção",
+            "icon": "⚠️",
+            "message": "Há sinal de chuva ou umidade elevada.",
+        }
+
+    return {
+        "status": "Normal",
+        "icon": "✅",
+        "message": "Sem sinal relevante de chuva no momento.",
+    }
+
+
+def get_attention_neighborhood(recent: pd.DataFrame) -> str:
+    grouped = (
+        recent.groupby("Local", as_index=False)
+        .agg({"Chuva (mm)": "sum", "Vento (km/h)": "max"})
+        .sort_values(["Chuva (mm)", "Vento (km/h)"], ascending=False)
+    )
+    neighborhood = grouped.iloc[0]
+    return f"{neighborhood['Local']} ({neighborhood['Chuva (mm)']:.2f} mm)"
+
+
+def get_windiest_neighborhood(recent: pd.DataFrame) -> str:
+    grouped = (
+        recent.groupby("Local", as_index=False)["Vento (km/h)"]
+        .max()
+        .sort_values("Vento (km/h)", ascending=False)
+    )
+    neighborhood = grouped.iloc[0]
+    return f"{neighborhood['Local']} ({neighborhood['Vento (km/h)']:.1f} km/h)"
+
+
+def render_conditions(dataframe: pd.DataFrame, latest: pd.Series) -> None:
+    recent = dataframe.tail(RECENT_HISTORY_ROWS)
+    conditions = classify_conditions(latest, recent)
+
+    st.markdown("---")
+    st.subheader("🧭 Situação atual")
+
+    columns = st.columns(4)
+    columns[0].metric(
+        f"{conditions['icon']} Status",
+        conditions["status"],
+    )
+    columns[1].metric("🌧️ Chuva recente", f"{recent['Chuva (mm)'].sum():.2f} mm")
+    columns[2].metric("🏙️ Bairro em atenção", get_attention_neighborhood(recent))
+    columns[3].metric("💨 Maior vento", get_windiest_neighborhood(recent))
+
+    st.info(conditions["message"])
+
+
 def render_summary(latest: pd.Series) -> None:
     st.subheader("📍 Resumo atual")
     st.caption(
@@ -217,8 +305,14 @@ def render_dashboard(runtime: MqttRuntime) -> None:
         st.warning("⚠️ Dados recebidos, mas sem timestamp válido para exibição.")
         return
 
+    dataframe = render_filters(dataframe)
+    if dataframe.empty:
+        st.info("Ainda não há leituras para o bairro selecionado.")
+        return
+
     latest = dataframe.iloc[-1]
     render_summary(latest)
+    render_conditions(dataframe, latest)
     render_charts(dataframe)
     render_history(dataframe, latest)
 
