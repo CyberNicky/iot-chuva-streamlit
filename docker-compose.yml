@@ -16,6 +16,8 @@ services:
     container_name: sensor-publisher
     depends_on:
       - mosquitto
+    volumes:
+      - ./cache:/app/cache
     environment:
       - PYTHONUNBUFFERED=1
       - APP_TIMEZONE=America/Maceio
@@ -23,7 +25,12 @@ services:
       - MQTT_PORT=1883
       - MQTT_TOPIC=iot/chuva
       - MQTT_RETAIN=true
-      - PUBLISH_INTERVAL_SECONDS=15
+      - PUBLISH_INTERVAL_SECONDS=5
+      - CITY_NAME=Maceió
+      - STATE_NAME=Alagoas
+      - COUNTRY_NAME=Brasil
+      - OVERPASS_URL=https://overpass-api.de/api/interpreter
+      - NEIGHBORHOOD_CACHE_FILE=/app/cache/neighborhoods_cache.json
     restart: always
 
   dashboard:

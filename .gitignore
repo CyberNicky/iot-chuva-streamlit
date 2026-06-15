@@ -14,4 +14,6 @@ env/
 dist/
 build/
 .cache/
+cache/
+neighborhoods_cache.json
 .pytest_cache/
