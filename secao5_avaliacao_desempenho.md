@@ -20,54 +20,54 @@ As métricas escolhidas consideram tanto o funcionamento da comunicação quanto
 
 **Tabela 1 - Métricas avaliadas**
 
-| Métrica | Descrição | Forma de medição |
-| --- | --- | --- |
-| Quantidade de bairros carregados | Número de bairros retornados pela consulta OpenStreetMap/Overpass | Logs do container `sensor` |
-| Taxa de entrega MQTT | Relação entre mensagens publicadas pelo sensor e mensagens recebidas pelo dashboard | Comparação entre logs de publicação e recebimento |
-| Intervalo entre publicações | Tempo observado entre mensagens consecutivas publicadas no tópico `iot/chuva` | Timestamps das mensagens do sensor |
-| Cobertura por bairro | Capacidade de percorrer os bairros carregados e manter uma última leitura consultável por bairro | Logs do sensor e tabela do dashboard |
-| Previsão de chuva | Precipitação acumulada prevista para as próximas 1h, 3h e 6h | Campos `previsao_chuva_1h`, `previsao_chuva_3h` e `previsao_chuva_6h` |
-| Uso de cache | Criação e reutilização da lista local de bairros | Arquivo `cache/neighborhoods_cache.json` |
-| Uso de CPU | Percentual de CPU consumido por cada container | Comando `docker stats --no-stream` |
-| Uso de memória | Memória utilizada por cada container durante a execução | Comando `docker stats --no-stream` |
-| Disponibilidade funcional | Capacidade dos três serviços permanecerem em execução | Comando `docker compose ps` |
-| Dashboard em funcionamento | Confirmação de que a interface web recebe dados, renderiza cards, tabelas, gráficos e JSON bruto | Acesso a `http://localhost:8501` durante a execução dos containers |
-| Latência operacional | Tempo entre a publicação de uma leitura pelo sensor e sua exibição no dashboard | Diferença entre logs de publicação/recebimento e ciclo de atualização da tela |
-| Throughput | Quantidade de mensagens processadas por unidade de tempo | Contagem de mensagens publicadas/recebidas dividida pelo tempo observado |
-| Mensagens publicadas x recebidas | Comparação direta entre o total de mensagens emitidas pelo sensor e o total recebido pelo dashboard | Logs dos containers `sensor` e `dashboard` |
+| Métrica                          | Descrição                                                                                           | Forma de medição                                                              |
+| -------------------------------- | --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Quantidade de bairros carregados | Número de bairros retornados pela consulta OpenStreetMap/Overpass                                   | Logs do container `sensor`                                                    |
+| Taxa de entrega MQTT             | Relação entre mensagens publicadas pelo sensor e mensagens recebidas pelo dashboard                 | Comparação entre logs de publicação e recebimento                             |
+| Intervalo entre publicações      | Tempo observado entre mensagens consecutivas publicadas no tópico `iot/chuva`                       | Timestamps das mensagens do sensor                                            |
+| Cobertura por bairro             | Capacidade de percorrer os bairros carregados e manter uma última leitura consultável por bairro    | Logs do sensor e tabela do dashboard                                          |
+| Previsão de chuva                | Precipitação acumulada prevista para as próximas 1h, 3h e 6h                                        | Campos `previsao_chuva_1h`, `previsao_chuva_3h` e `previsao_chuva_6h`         |
+| Uso de cache                     | Criação e reutilização da lista local de bairros                                                    | Arquivo `cache/neighborhoods_cache.json`                                      |
+| Uso de CPU                       | Percentual de CPU consumido por cada container                                                      | Comando `docker stats --no-stream`                                            |
+| Uso de memória                   | Memória utilizada por cada container durante a execução                                             | Comando `docker stats --no-stream`                                            |
+| Disponibilidade funcional        | Capacidade dos três serviços permanecerem em execução                                               | Comando `docker compose ps`                                                   |
+| Dashboard em funcionamento       | Confirmação de que a interface web recebe dados, renderiza cards, tabelas, gráficos e JSON bruto    | Acesso a `http://localhost:8501` durante a execução dos containers            |
+| Latência operacional             | Tempo entre a publicação de uma leitura pelo sensor e sua exibição no dashboard                     | Diferença entre logs de publicação/recebimento e ciclo de atualização da tela |
+| Throughput                       | Quantidade de mensagens processadas por unidade de tempo                                            | Contagem de mensagens publicadas/recebidas dividida pelo tempo observado      |
+| Mensagens publicadas x recebidas | Comparação direta entre o total de mensagens emitidas pelo sensor e o total recebido pelo dashboard | Logs dos containers `sensor` e `dashboard`                                    |
 
 Os fatores e níveis adotados no experimento são apresentados na Tabela 2.
 
 **Tabela 2 - Fatores e níveis do experimento**
 
-| Fator | Valor utilizado |
-| --- | --- |
-| Cidade monitorada | Maceió/AL |
-| Fonte de localização | OpenStreetMap/Overpass |
-| Fonte climática | Open-Meteo |
-| Protocolo de comunicação | MQTT |
-| Broker | Eclipse Mosquitto |
-| Tópico MQTT | `iot/chuva` |
-| Intervalo de publicação | 5 segundos entre um bairro e o próximo |
+| Fator                         | Valor utilizado                                                  |
+| ----------------------------- | ---------------------------------------------------------------- |
+| Cidade monitorada             | Maceió/AL                                                        |
+| Fonte de localização          | OpenStreetMap/Overpass                                           |
+| Fonte climática               | Open-Meteo                                                       |
+| Protocolo de comunicação      | MQTT                                                             |
+| Broker                        | Eclipse Mosquitto                                                |
+| Tópico MQTT                   | `iot/chuva`                                                      |
+| Intervalo de publicação       | 5 segundos entre um bairro e o próximo                           |
 | Ordem de consulta dos bairros | Sequencial, seguindo a lista carregada do OpenStreetMap/Overpass |
-| Cache dos bairros | `cache/neighborhoods_cache.json` |
-| Atualização do dashboard | 2 segundos |
-| Histórico máximo em memória | 500 mensagens |
-| Serviços avaliados | `mosquitto`, `sensor` e `dashboard` |
+| Cache dos bairros             | `cache/neighborhoods_cache.json`                                 |
+| Atualização do dashboard      | 2 segundos                                                       |
+| Histórico máximo em memória   | 500 mensagens                                                    |
+| Serviços avaliados            | `mosquitto`, `sensor` e `dashboard`                              |
 
 Para deixar explícita a configuração operacional usada na medição, os fatores diretamente relacionados ao fluxo MQTT e à atualização visual do dashboard foram organizados em tabela e em gráfico.
 
 **Tabela 3 - Fatores e valores operacionais**
 
-| Fator | Valor utilizado | Impacto na avaliação |
-| --- | --- | --- |
-| Frequência de publicação | 1 mensagem a cada 5 segundos configurados | Define a carga gerada pelo sensor e influencia o throughput esperado |
-| Broker MQTT | Eclipse Mosquitto, serviço `mosquitto`, porta `1883` | Intermedia a entrega entre sensor e dashboard |
-| Tópico MQTT | `iot/chuva` | Canal único usado para publicação e assinatura das leituras |
-| Retenção MQTT | `MQTT_RETAIN=true` | Permite que o dashboard receba a última leitura ao iniciar |
-| Refresh do dashboard | 2 segundos | Define o tempo máximo esperado para atualização visual após uma mensagem chegar |
-| Histórico em memória | 500 mensagens | Limita o volume mantido para tabelas e gráficos recentes |
-| Bairros monitorados | 56 bairros carregados | Define o tempo aproximado para completar uma volta de monitoramento |
+| Fator                    | Valor utilizado                                      | Impacto na avaliação                                                            |
+| ------------------------ | ---------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Frequência de publicação | 1 mensagem a cada 5 segundos configurados            | Define a carga gerada pelo sensor e influencia o throughput esperado            |
+| Broker MQTT              | Eclipse Mosquitto, serviço `mosquitto`, porta `1883` | Intermedia a entrega entre sensor e dashboard                                   |
+| Tópico MQTT              | `iot/chuva`                                          | Canal único usado para publicação e assinatura das leituras                     |
+| Retenção MQTT            | `MQTT_RETAIN=true`                                   | Permite que o dashboard receba a última leitura ao iniciar                      |
+| Refresh do dashboard     | 2 segundos                                           | Define o tempo máximo esperado para atualização visual após uma mensagem chegar |
+| Histórico em memória     | 500 mensagens                                        | Limita o volume mantido para tabelas e gráficos recentes                        |
+| Bairros monitorados      | 56 bairros carregados                                | Define o tempo aproximado para completar uma volta de monitoramento             |
 
 **Gráfico 1 - Fatores e valores da configuração operacional**
 
@@ -111,26 +111,26 @@ O segundo experimento avaliou o fluxo principal da solução: publicação seque
 
 **Tabela 4 - Amostra de mensagens publicadas e recebidas**
 
-| Horário | Bairro | Interpretação | Temperatura | Umidade | Pressão | Chuva agora | Chuva prevista 3h | Vento | Resultado |
-| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| 16:02:30 | Antares | Chuva fraca agora | 26,1 °C | 81% | 1014,2 hPa | 0,1 mm | 0,4 mm | 14,1 km/h | Recebida |
-| 16:02:36 | Barro Duro | Chuva fraca agora | 26,1 °C | 81% | 1014,2 hPa | 0,1 mm | 0,4 mm | 14,1 km/h | Recebida |
-| 16:02:42 | Bebedouro | Chuva fraca agora | 26,1 °C | 81% | 1014,2 hPa | 0,1 mm | 0,4 mm | 14,1 km/h | Recebida |
-| 16:02:48 | Benedito Bentes | Chuva fraca agora | 25,6 °C | 85% | 1014,3 hPa | 0,1 mm | 0,2 mm | 13,1 km/h | Recebida |
-| 16:02:54 | Benedito Bentes II | Chuva fraca agora | 25,6 °C | 85% | 1014,3 hPa | 0,1 mm | 0,2 mm | 13,1 km/h | Recebida |
+| Horário  | Bairro             | Interpretação     | Temperatura | Umidade |    Pressão | Chuva agora | Chuva prevista 3h |     Vento | Resultado |
+| -------- | ------------------ | ----------------- | ----------: | ------: | ---------: | ----------: | ----------------: | --------: | --------- |
+| 16:02:30 | Antares            | Chuva fraca agora |     26,1 °C |     81% | 1014,2 hPa |      0,1 mm |            0,4 mm | 14,1 km/h | Recebida  |
+| 16:02:36 | Barro Duro         | Chuva fraca agora |     26,1 °C |     81% | 1014,2 hPa |      0,1 mm |            0,4 mm | 14,1 km/h | Recebida  |
+| 16:02:42 | Bebedouro          | Chuva fraca agora |     26,1 °C |     81% | 1014,2 hPa |      0,1 mm |            0,4 mm | 14,1 km/h | Recebida  |
+| 16:02:48 | Benedito Bentes    | Chuva fraca agora |     25,6 °C |     85% | 1014,3 hPa |      0,1 mm |            0,2 mm | 13,1 km/h | Recebida  |
+| 16:02:54 | Benedito Bentes II | Chuva fraca agora |     25,6 °C |     85% | 1014,3 hPa |      0,1 mm |            0,2 mm | 13,1 km/h | Recebida  |
 
 Na amostra observada após as melhorias, 5 mensagens consecutivas foram publicadas pelo sensor e recebidas pelo dashboard, resultando em taxa de entrega de 100% no período avaliado. A ordem dos bairros observados nos logs foi Antares, Barro Duro, Bebedouro, Benedito Bentes e Benedito Bentes II, confirmando que o sensor percorre a lista de bairros sequencialmente. O intervalo médio observado entre as publicações ficou próximo de 6 segundos, valor compatível com o parâmetro configurado de 5 segundos somado ao tempo de consulta à API climática e construção do pacote JSON.
 
 **Tabela 5 - Métricas operacionais do fluxo MQTT**
 
-| Métrica | Valor observado | Interpretação |
-| --- | ---: | --- |
-| Mensagens publicadas | 5 | Total de leituras emitidas pelo sensor na amostra |
-| Mensagens recebidas | 5 | Total de leituras processadas pelo dashboard na mesma amostra |
-| Taxa de entrega | 100% | Todas as mensagens publicadas foram recebidas |
-| Intervalo médio entre publicações | Aproximadamente 6 s | Próximo ao intervalo configurado de 5 s, com acréscimo do tempo de consulta e processamento |
-| Throughput observado | Aproximadamente 0,17 msg/s | Equivalente a cerca de 10 mensagens por minuto |
-| Latência de atualização visual | Até 2 s após o recebimento | Limitada principalmente pelo refresh automático do dashboard |
+| Métrica                           |            Valor observado | Interpretação                                                                               |
+| --------------------------------- | -------------------------: | ------------------------------------------------------------------------------------------- |
+| Mensagens publicadas              |                          5 | Total de leituras emitidas pelo sensor na amostra                                           |
+| Mensagens recebidas               |                          5 | Total de leituras processadas pelo dashboard na mesma amostra                               |
+| Taxa de entrega                   |                       100% | Todas as mensagens publicadas foram recebidas                                               |
+| Intervalo médio entre publicações |        Aproximadamente 6 s | Próximo ao intervalo configurado de 5 s, com acréscimo do tempo de consulta e processamento |
+| Throughput observado              | Aproximadamente 0,17 msg/s | Equivalente a cerca de 10 mensagens por minuto                                              |
+| Latência de atualização visual    | Até 2 s após o recebimento | Limitada principalmente pelo refresh automático do dashboard                                |
 
 **Gráfico 2 - Mensagens publicadas x recebidas**
 
@@ -174,11 +174,11 @@ O terceiro experimento mediu o consumo de CPU e memória dos containers durante 
 
 **Tabela 6 - Consumo de recursos dos containers**
 
-| Container | CPU | Memória utilizada | Observação |
-| --- | ---: | ---: | --- |
-| `dashboard-streamlit` | 0,45% | 114,3 MiB | Maior consumo relativo, por executar a interface web e renderizar gráficos |
-| `sensor-publisher` | 0,00% | 18,25 MiB | Baixo consumo, pois executa uma coleta periódica simples |
-| `mqtt-broker` | 0,08% | 2,258 MiB | Consumo muito baixo, compatível com broker leve |
+| Container             |   CPU | Memória utilizada | Observação                                                                 |
+| --------------------- | ----: | ----------------: | -------------------------------------------------------------------------- |
+| `dashboard-streamlit` | 0,45% |         114,3 MiB | Maior consumo relativo, por executar a interface web e renderizar gráficos |
+| `sensor-publisher`    | 0,00% |         18,25 MiB | Baixo consumo, pois executa uma coleta periódica simples                   |
+| `mqtt-broker`         | 0,08% |         2,258 MiB | Consumo muito baixo, compatível com broker leve                            |
 
 **Gráfico 5 - Consumo de memória por container**
 
@@ -213,8 +213,6 @@ O broker Mosquitto apresentou uso de memória inferior a 4 MiB e uso de CPU prat
 O quarto experimento avaliou se as mensagens recebidas eram convertidas corretamente em informações úteis ao usuário. O dashboard processa os campos recebidos no JSON, incluindo bairro, temperatura, umidade, pressão, precipitação, velocidade do vento, horário e dia da semana. Em seguida, esses dados são exibidos em cards de resumo, tabela de última leitura por bairro, tabela histórica, gráficos de tendência e seção de situação atual.
 
 Na amostra coletada, os registros apresentaram chuva positiva, previsão acumulada para as próximas horas e umidade igual ou superior a 81% em alguns bairros. Segundo as regras implementadas no arquivo `dashboard_web.py`, o sistema classifica a situação como `Atenção` quando há chuva recente, previsão de chuva próxima ou umidade elevada. Assim, os dados observados validam o comportamento esperado do mecanismo de classificação: o dashboard não apenas exibe os valores brutos, mas também traduz as leituras em um indicador operacional de acompanhamento. Além disso, a tabela “Última leitura por bairro” permite consultar rapidamente a condição mais recente disponível para cada bairro já percorrido pelo sensor e inclui a coluna “Interpretação da chuva”, que apresenta mensagens textuais como “Chuva fraca agora” ou “Sem chuva prevista”.
-
-Para documentar visualmente este experimento no artigo, recomenda-se inserir uma captura de tela do dashboard em execução, mostrando: (i) o resumo atual; (ii) a tabela de última leitura por bairro; (iii) a situação atual; (iv) os gráficos de tendência; (v) a tabela de histórico recente; e (vi) o último pacote MQTT recebido em JSON. Essa imagem deve ser referenciada no texto como evidência visual da integração entre coleta, comunicação e visualização.
 
 **Figura 2 - Dashboard em funcionamento**
 
