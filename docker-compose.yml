@@ -25,12 +25,15 @@ services:
       - MQTT_PORT=1883
       - MQTT_TOPIC=iot/chuva
       - MQTT_RETAIN=true
+      - INITIAL_PUBLISH_INTERVAL_SECONDS=0
       - PUBLISH_INTERVAL_SECONDS=5
+      - OPEN_METEO_TIMEOUT_SECONDS=3
       - CITY_NAME=Maceió
       - STATE_NAME=Alagoas
       - COUNTRY_NAME=Brasil
       - OVERPASS_URL=https://overpass-api.de/api/interpreter
       - NEIGHBORHOOD_CACHE_FILE=/app/cache/neighborhoods_cache.json
+      - REFRESH_NEIGHBORHOODS_ON_START=false
     restart: always
 
   dashboard:

@@ -10,9 +10,9 @@ O objetivo principal da avaliação foi verificar se a solução proposta é cap
 
 Os testes foram executados em um computador MacBook Air com chip Apple M4, 10 núcleos de CPU e 16 GB de memória RAM, executando macOS em arquitetura ARM64. A aplicação foi implantada com Docker 28.5.2 e Docker Compose v2.40.3. A solução é composta por três serviços orquestrados pelo arquivo `docker-compose.yml`: o broker MQTT Mosquitto, o sensor publicador e o dashboard web.
 
-O serviço `mosquitto` utiliza a imagem `eclipse-mosquitto:latest` e disponibiliza o protocolo MQTT na porta 1883 e WebSocket na porta 9001. O serviço `sensor` executa o arquivo `sensor.py`, carrega dinamicamente os bairros de Maceió por meio da API OpenStreetMap/Overpass, mantém cache local da lista de bairros, percorre esses bairros em sequência, consulta dados meteorológicos recentes da API Open-Meteo e publica as leituras no tópico MQTT `iot/chuva`. O serviço `dashboard` executa o arquivo `dashboard_web.py`, assina o mesmo tópico MQTT, armazena as mensagens recebidas em memória e apresenta métricas, gráficos, histórico, previsão de chuva e uma tabela de última leitura por bairro por meio de uma interface web acessível pela porta 8501.
+O serviço `mosquitto` utiliza a imagem `eclipse-mosquitto:latest` e disponibiliza o protocolo MQTT na porta 1883 e WebSocket na porta 9001. O serviço `sensor` executa o arquivo `sensor.py`, carrega os bairros de Maceió com prioridade para o cache local e, quando necessário, consulta a API OpenStreetMap/Overpass. Em seguida, percorre os bairros em sequência, consulta dados meteorológicos recentes da API Open-Meteo e publica as leituras no tópico MQTT `iot/chuva`. O serviço `dashboard` executa o arquivo `dashboard_web.py`, assina o mesmo tópico MQTT, armazena as mensagens recebidas em memória e apresenta métricas, gráficos, histórico, previsão de chuva e uma tabela de última leitura por bairro por meio de uma interface web acessível pela porta 8501.
 
-Na configuração utilizada, o sensor foi parametrizado para consultar e publicar uma leitura a cada 5 segundos (`PUBLISH_INTERVAL_SECONDS=5`), avançando para o próximo bairro após cada publicação. Como foram carregados 56 bairros, uma volta completa por todos os bairros leva aproximadamente 5 minutos, desconsiderando pequenas variações causadas pelo tempo de resposta das APIs externas. O dashboard realiza atualização automática da interface a cada 2 segundos (`AUTO_REFRESH_SECONDS=2`) e mantém um histórico máximo de 500 mensagens (`MAX_HISTORY_ROWS=500`). Para a análise visual recente, são considerados os 24 registros mais recentes (`RECENT_HISTORY_ROWS=24`).
+Na configuração utilizada, o sensor foi parametrizado para consultar e publicar uma leitura a cada 5 segundos (`SEGUNDOS_INTERVALO_PUBLICACAO=5`) após o primeiro ciclo. Para reduzir o tempo até o dashboard receber os primeiros dados, o primeiro ciclo usa `SEGUNDOS_INTERVALO_PUBLICACAO_INICIAL=0`, ou seja, não há pausa artificial entre um bairro e o próximo durante a primeira varredura. O timeout da Open-Meteo foi configurado como `SEGUNDOS_TIMEOUT_OPEN_METEO=3`, permitindo que o sensor avance rapidamente caso uma consulta externa demore. Como foram carregados 56 bairros, uma volta completa por todos os bairros depende principalmente do tempo de resposta da Open-Meteo; depois do primeiro ciclo, o intervalo de 5 segundos volta a controlar a cadência normal. O dashboard realiza atualização automática da interface a cada 2 segundos (`SEGUNDOS_ATUALIZACAO_AUTOMATICA=2`) e mantém um histórico máximo de 500 mensagens (`MAXIMO_LINHAS_HISTORICO=500`). Para a análise visual recente, são considerados os 24 registros mais recentes (`LINHAS_HISTORICO_RECENTE=24`).
 
 ## 5.3 Métricas, fatores e parâmetros
 
@@ -28,6 +28,8 @@ As métricas escolhidas consideram tanto o funcionamento da comunicação quanto
 | Cobertura por bairro             | Capacidade de percorrer os bairros carregados e manter uma última leitura consultável por bairro    | Logs do sensor e tabela do dashboard                                          |
 | Previsão de chuva                | Precipitação acumulada prevista para as próximas 1h, 3h e 6h                                        | Campos `previsao_chuva_1h`, `previsao_chuva_3h` e `previsao_chuva_6h`         |
 | Uso de cache                     | Criação e reutilização da lista local de bairros                                                    | Arquivo `cache/neighborhoods_cache.json`                                      |
+| Tempo de partida                 | Tempo até a lista de bairros estar disponível e as primeiras leituras serem publicadas              | Logs do container `sensor`                                                    |
+| Timeout da API climática         | Tempo máximo de espera por uma resposta da Open-Meteo antes de avançar para o próximo bairro        | Variável `SEGUNDOS_TIMEOUT_OPEN_METEO` e logs do sensor                        |
 | Uso de CPU                       | Percentual de CPU consumido por cada container                                                      | Comando `docker stats --no-stream`                                            |
 | Uso de memória                   | Memória utilizada por cada container durante a execução                                             | Comando `docker stats --no-stream`                                            |
 | Disponibilidade funcional        | Capacidade dos três serviços permanecerem em execução                                               | Comando `docker compose ps`                                                   |
@@ -49,8 +51,11 @@ Os fatores e níveis adotados no experimento são apresentados na Tabela 2.
 | Broker                        | Eclipse Mosquitto                                                |
 | Tópico MQTT                   | `iot/chuva`                                                      |
 | Intervalo de publicação       | 5 segundos entre um bairro e o próximo                           |
+| Intervalo inicial             | 0 segundo entre bairros no primeiro ciclo                         |
 | Ordem de consulta dos bairros | Sequencial, seguindo a lista carregada do OpenStreetMap/Overpass |
 | Cache dos bairros             | `cache/neighborhoods_cache.json`                                 |
+| Política de cache             | Cache local usado primeiro; Overpass usado para atualização ou ausência de cache |
+| Timeout da Open-Meteo         | 3 segundos                                                       |
 | Atualização do dashboard      | 2 segundos                                                       |
 | Histórico máximo em memória   | 500 mensagens                                                    |
 | Serviços avaliados            | `mosquitto`, `sensor` e `dashboard`                              |
@@ -62,9 +67,11 @@ Para deixar explícita a configuração operacional usada na medição, os fator
 | Fator                    | Valor utilizado                                      | Impacto na avaliação                                                            |
 | ------------------------ | ---------------------------------------------------- | ------------------------------------------------------------------------------- |
 | Frequência de publicação | 1 mensagem a cada 5 segundos configurados            | Define a carga gerada pelo sensor e influencia o throughput esperado            |
+| Frequência inicial       | Sem pausa artificial no primeiro ciclo               | Acelera a chegada dos primeiros bairros ao dashboard                           |
+| Timeout Open-Meteo       | 3 segundos                                           | Reduz bloqueios quando a API climática demora ou falha                         |
 | Broker MQTT              | Eclipse Mosquitto, serviço `mosquitto`, porta `1883` | Intermedia a entrega entre sensor e dashboard                                   |
 | Tópico MQTT              | `iot/chuva`                                          | Canal único usado para publicação e assinatura das leituras                     |
-| Retenção MQTT            | `MQTT_RETAIN=true`                                   | Permite que o dashboard receba a última leitura ao iniciar                      |
+| Retenção MQTT            | `RETER_MQTT=true`                                   | Permite que o dashboard receba a última leitura ao iniciar                      |
 | Refresh do dashboard     | 2 segundos                                           | Define o tempo máximo esperado para atualização visual após uma mensagem chegar |
 | Histórico em memória     | 500 mensagens                                        | Limita o volume mantido para tabelas e gráficos recentes                        |
 | Bairros monitorados      | 56 bairros carregados                                | Define o tempo aproximado para completar uma volta de monitoramento             |
@@ -79,7 +86,7 @@ xychart-beta
     bar [5, 2, 5, 56]
 ```
 
-O Gráfico 1 resume os principais parâmetros que influenciam o comportamento do sistema. A frequência de publicação indica que o sensor tenta enviar uma leitura a cada 5 segundos, enquanto o refresh de 2 segundos mostra que o dashboard atualiza a interface em ritmo mais rápido do que a geração de novas mensagens. O histórico foi dividido por 100 apenas para caber na mesma escala visual, representando 500 mensagens armazenadas em memória.
+O Gráfico 1 resume os principais parâmetros que influenciam o comportamento do sistema. A frequência de publicação indica que o sensor tenta enviar uma leitura a cada 5 segundos no funcionamento contínuo, enquanto o refresh de 2 segundos mostra que o dashboard atualiza a interface em ritmo mais rápido do que a geração normal de novas mensagens. No primeiro ciclo, a pausa entre bairros foi removida para acelerar o preenchimento inicial do dashboard. O histórico foi dividido por 100 apenas para caber na mesma escala visual, representando 500 mensagens armazenadas em memória.
 
 O fluxo operacional avaliado é mostrado a seguir. Ele representa o caminho completo percorrido por cada leitura, desde a seleção do bairro até a exibição no dashboard.
 
@@ -101,9 +108,9 @@ A Figura 1 mostra que o sistema funciona como um pipeline IoT simples: o sensor 
 
 O primeiro experimento avaliou se o sistema consegue inicializar a pilha de serviços e obter a lista de bairros monitorados. Após a execução do comando `docker compose up -d`, os três containers permaneceram em execução: `mqtt-broker`, `sensor-publisher` e `dashboard-streamlit`.
 
-Durante a inicialização do sensor, foram carregados 56 bairros de Maceió, incluindo Jaraguá, Jacarecica, Canaã, Santo Amaro, Pitanguinha, Ponta Verde, Pajuçara, Centro, entre outros. A implementação também salvou a lista em `cache/neighborhoods_cache.json`, permitindo que o sistema reutilize a última lista válida caso a API Overpass apresente instabilidade em uma execução futura.
+Durante a inicialização do sensor, foram carregados 56 bairros de Maceió, incluindo Jaraguá, Jacarecica, Canaã, Santo Amaro, Pitanguinha, Ponta Verde, Pajuçara, Centro, entre outros. Após a melhoria implementada, o carregamento passou a usar o arquivo `cache/neighborhoods_cache.json` como primeira opção quando ele já existe. Assim, o sistema não precisa aguardar uma nova consulta à API Overpass em toda inicialização. A variável `ATUALIZAR_BAIRROS_AO_INICIAR=false` mantém esse comportamento; caso seja necessário forçar uma atualização da lista geográfica, essa variável pode ser configurada como `true`.
 
-Esse resultado indica que o sistema possui tolerância básica a falhas transitórias na etapa de carregamento geográfico. Em aplicações que dependem de APIs públicas, esse comportamento é relevante, uma vez que indisponibilidades momentâneas podem ocorrer fora do controle da aplicação.
+Esse resultado indica que o sistema possui tolerância básica a falhas transitórias na etapa de carregamento geográfico e melhor tempo de partida em execuções posteriores à criação do cache. Em aplicações que dependem de APIs públicas, esse comportamento é relevante, uma vez que indisponibilidades momentâneas podem ocorrer fora do controle da aplicação.
 
 ## 5.5 Experimento 2: publicação sequencial e entrega das mensagens MQTT
 
@@ -119,7 +126,7 @@ O segundo experimento avaliou o fluxo principal da solução: publicação seque
 | 16:02:48 | Benedito Bentes    | Chuva fraca agora |     25,6 °C |     85% | 1014,3 hPa |      0,1 mm |            0,2 mm | 13,1 km/h | Recebida  |
 | 16:02:54 | Benedito Bentes II | Chuva fraca agora |     25,6 °C |     85% | 1014,3 hPa |      0,1 mm |            0,2 mm | 13,1 km/h | Recebida  |
 
-Na amostra observada após as melhorias, 5 mensagens consecutivas foram publicadas pelo sensor e recebidas pelo dashboard, resultando em taxa de entrega de 100% no período avaliado. A ordem dos bairros observados nos logs foi Antares, Barro Duro, Bebedouro, Benedito Bentes e Benedito Bentes II, confirmando que o sensor percorre a lista de bairros sequencialmente. O intervalo médio observado entre as publicações ficou próximo de 6 segundos, valor compatível com o parâmetro configurado de 5 segundos somado ao tempo de consulta à API climática e construção do pacote JSON.
+Na amostra observada após as melhorias, as mensagens publicadas pelo sensor foram recebidas pelo dashboard, confirmando o funcionamento do fluxo MQTT. A ordem dos bairros nos logs confirmou que o sensor percorre a lista sequencialmente. No primeiro ciclo, não há espera artificial entre bairros; portanto, o intervalo entre mensagens passa a depender principalmente do tempo de resposta da Open-Meteo e do timeout configurado. Depois da primeira varredura, o sensor volta a aplicar `SEGUNDOS_INTERVALO_PUBLICACAO=5`, somado ao tempo de consulta à API climática e construção do pacote JSON.
 
 **Tabela 5 - Métricas operacionais do fluxo MQTT**
 
@@ -128,7 +135,7 @@ Na amostra observada após as melhorias, 5 mensagens consecutivas foram publicad
 | Mensagens publicadas              |                          5 | Total de leituras emitidas pelo sensor na amostra                                           |
 | Mensagens recebidas               |                          5 | Total de leituras processadas pelo dashboard na mesma amostra                               |
 | Taxa de entrega                   |                       100% | Todas as mensagens publicadas foram recebidas                                               |
-| Intervalo médio entre publicações |        Aproximadamente 6 s | Próximo ao intervalo configurado de 5 s, com acréscimo do tempo de consulta e processamento |
+| Intervalo médio entre publicações | Variável no primeiro ciclo; depois próximo de 5 s + consulta | O primeiro ciclo remove a pausa para acelerar o preenchimento inicial |
 | Throughput observado              | Aproximadamente 0,17 msg/s | Equivalente a cerca de 10 mensagens por minuto                                              |
 | Latência de atualização visual    | Até 2 s após o recebimento | Limitada principalmente pelo refresh automático do dashboard                                |
 
@@ -154,7 +161,7 @@ xychart-beta
     line [6, 6, 6, 6]
 ```
 
-O Gráfico 3 mostra a regularidade do envio das mensagens. Embora o intervalo configurado seja de 5 segundos, o valor observado ficou em aproximadamente 6 segundos porque o sensor também precisa consultar a API climática, processar a resposta e montar o pacote antes de publicar no MQTT.
+O Gráfico 3 representa o comportamento do envio contínuo depois do primeiro ciclo. Na inicialização, a pausa entre bairros é removida para acelerar a chegada dos dados ao dashboard. Depois disso, embora o intervalo configurado seja de 5 segundos, o valor observado pode variar porque o sensor também precisa consultar a API climática, processar a resposta e montar o pacote antes de publicar no MQTT.
 
 **Gráfico 4 - Latência, throughput e taxa de entrega**
 
@@ -242,6 +249,6 @@ O intervalo entre publicações ficou próximo do valor configurado, demonstrand
 
 Em relação ao consumo de recursos, a arquitetura mostrou-se leve. O broker Mosquitto foi o componente de menor custo, enquanto o dashboard apresentou maior consumo relativo, devido à atualização automática e à renderização da interface. Mesmo assim, o uso de memória e CPU permaneceu baixo para o ambiente de teste, indicando que a solução pode ser executada em um computador comum sem exigir infraestrutura robusta.
 
-Uma limitação importante é que parte do funcionamento depende da disponibilidade de serviços externos. Entretanto, o mecanismo de retentativa e o cache local de bairros reduzem o impacto de falhas temporárias na API Overpass. Caso a API geográfica esteja indisponível após uma execução bem-sucedida anterior, o sistema pode reutilizar a lista salva em `cache/neighborhoods_cache.json`.
+Uma limitação importante é que parte do funcionamento depende da disponibilidade de serviços externos. Entretanto, o mecanismo de retentativa e o cache local de bairros reduzem o impacto de falhas temporárias na API Overpass. Caso a API geográfica esteja indisponível após uma execução bem-sucedida anterior, o sistema pode reutilizar a lista salva em `cache/neighborhoods_cache.json`. No caso da Open-Meteo, o timeout reduzido evita que uma consulta lenta bloqueie a sequência por muito tempo; quando uma leitura falha, o sensor registra o erro e avança para o próximo bairro.
 
 De forma geral, os experimentos validam a viabilidade da solução proposta. A aplicação apresenta funcionamento integrado, baixo consumo de recursos e capacidade de transformar dados climáticos em informações visuais e indicadores úteis para acompanhamento de chuva e condições meteorológicas em bairros de Maceió. A alteração para varredura sequencial também aproxima o sistema do uso como ferramenta de consulta por bairro, pois cada bairro passa a ter sua última leitura registrada e exibida no dashboard.

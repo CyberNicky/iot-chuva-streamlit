@@ -35,7 +35,7 @@ dashboard_web.py
 Interface web Streamlit
 ```
 
-Em termos práticos, o sensor percorre em sequência os bairros carregados da base do OpenStreetMap/Overpass, consulta a previsão/condição climática para as coordenadas de cada bairro na Open-Meteo e monta um pacote JSON com os dados. Esse pacote é publicado no tópico MQTT `iot/chuva`. O dashboard está inscrito nesse mesmo tópico, recebe cada mensagem, converte os dados para uma estrutura tabular e atualiza a interface web, incluindo uma tabela com a última leitura disponível de cada bairro.
+Em termos práticos, o sensor percorre em sequência os bairros carregados. Quando já existe cache local, a lista é lida de `cache/neighborhoods_cache.json` antes de tentar uma nova consulta ao OpenStreetMap/Overpass, reduzindo o tempo de inicialização. Depois disso, o sensor consulta a previsão/condição climática para as coordenadas de cada bairro na Open-Meteo e monta um pacote JSON com os dados. Esse pacote é publicado no tópico MQTT `iot/chuva`. O dashboard está inscrito nesse mesmo tópico, recebe cada mensagem, converte os dados para uma estrutura tabular e atualiza a interface web, incluindo uma tabela com a última leitura disponível de cada bairro.
 
 ## 3. Estrutura de arquivos
 
@@ -121,7 +121,7 @@ from zoneinfo import ZoneInfo
 import paho.mqtt.client as mqtt
 import requests
 
-from neighborhoods import Neighborhoods, format_neighborhoods, load_neighborhoods
+from neighborhoods import Bairros, formatar_bairros, carregar_bairros
 ```
 
 As bibliotecas utilizadas têm os seguintes papéis:
@@ -140,43 +140,45 @@ As bibliotecas utilizadas têm os seguintes papéis:
 ### 4.2 Configurações globais
 
 ```python
-MQTT_BROKER = os.getenv("MQTT_BROKER", "mosquitto")
-MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
-MQTT_TOPIC = os.getenv("MQTT_TOPIC", "iot/chuva")
-MQTT_RETAIN = os.getenv("MQTT_RETAIN", "true").lower() == "true"
-APP_TIMEZONE = os.getenv("APP_TIMEZONE", "America/Maceio")
+BROKER_MQTT = os.getenv("MQTT_BROKER", "mosquitto")
+PORTA_MQTT = int(os.getenv("MQTT_PORT", "1883"))
+TOPICO_MQTT = os.getenv("MQTT_TOPIC", "iot/chuva")
+RETER_MQTT = os.getenv("MQTT_RETAIN", "true").lower() == "true"
+FUSO_HORARIO_APP = os.getenv("APP_TIMEZONE", "America/Maceio")
 ```
 
 Essas constantes configuram a conexão MQTT e o fuso horário da aplicação. Os valores podem ser definidos por variáveis de ambiente no `docker-compose.yml`. Caso nenhuma variável seja informada, o código usa valores padrão.
 
 ```python
-OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
-PUBLISH_INTERVAL_SECONDS = int(os.getenv("PUBLISH_INTERVAL_SECONDS", "60"))
+URL_OPEN_METEO = "https://api.open-meteo.com/v1/forecast"
+SEGUNDOS_TIMEOUT_OPEN_METEO = int(os.getenv("OPEN_METEO_TIMEOUT_SECONDS", "5"))
+SEGUNDOS_INTERVALO_PUBLICACAO = int(os.getenv("PUBLISH_INTERVAL_SECONDS", "60"))
+SEGUNDOS_INTERVALO_PUBLICACAO_INICIAL = int(os.getenv("INITIAL_PUBLISH_INTERVAL_SECONDS", "0"))
 ```
 
-Essas constantes definem a API climática usada e o intervalo entre publicações. No Docker Compose, esse intervalo foi configurado como 5 segundos para facilitar a demonstração e preencher a tabela de bairros mais rapidamente.
+Essas constantes definem a API climática usada, o tempo máximo de espera por resposta da Open-Meteo e os intervalos de publicação. No Docker Compose, `SEGUNDOS_INTERVALO_PUBLICACAO` foi configurado como 5 segundos para o funcionamento contínuo. Já `SEGUNDOS_INTERVALO_PUBLICACAO_INICIAL` foi configurado como 0 segundo para que a primeira varredura dos bairros aconteça sem pausa artificial entre um bairro e o próximo, acelerando a chegada dos primeiros dados ao dashboard.
 
 ```python
-MAX_MQTT_RETRIES = 10
-MQTT_RETRY_DELAY_SECONDS = 2
-MAX_NEIGHBORHOOD_RETRIES = 10
-NEIGHBORHOOD_RETRY_DELAY_SECONDS = 5
+MAXIMO_TENTATIVAS_MQTT = 10
+SEGUNDOS_ESPERA_TENTATIVA_MQTT = 2
+MAXIMO_TENTATIVAS_BAIRROS = 10
+SEGUNDOS_ESPERA_TENTATIVA_BAIRROS = 5
 ```
 
 Esses valores controlam as tentativas de reconexão ao MQTT e as tentativas de carregamento dos bairros. Isso evita que a aplicação falhe imediatamente caso algum serviço demore a responder.
 
-### 4.3 Tipo `WeatherPayload`
+### 4.3 Tipo `PacoteClima`
 
 ```python
-WeatherPayload = Dict[str, Union[float, int, str]]
+PacoteClima = Dict[str, Union[float, int, str]]
 ```
 
 Esse tipo representa o formato geral do pacote climático publicado pelo sensor. O pacote contém valores numéricos, como temperatura e umidade, e valores textuais, como bairro e timestamp.
 
-### 4.4 Dicionário `WEEKDAYS_PT`
+### 4.4 Dicionário `DIAS_SEMANA_PT`
 
 ```python
-WEEKDAYS_PT = {
+DIAS_SEMANA_PT = {
     0: "segunda-feira",
     1: "terça-feira",
     ...
@@ -185,30 +187,30 @@ WEEKDAYS_PT = {
 
 Esse dicionário converte o número do dia da semana retornado pelo Python para texto em português.
 
-### 4.5 Função `connect_mqtt`
+### 4.5 Função `conectar_mqtt`
 
 ```python
-def connect_mqtt() -> mqtt.Client:
+def conectar_mqtt() -> mqtt.Client:
 ```
 
 Essa função cria um cliente MQTT e tenta conectá-lo ao broker configurado. Ela faz até 10 tentativas, aguardando 2 segundos entre cada uma. Se a conexão for bem-sucedida, retorna o cliente conectado. Caso todas as tentativas falhem, lança um erro.
 
 Essa função é importante porque, em ambientes com Docker Compose, o container do sensor pode iniciar antes de o broker estar totalmente pronto. As retentativas reduzem esse problema.
 
-### 4.6 Função `load_dynamic_neighborhoods`
+### 4.6 Função `carregar_bairros_dinamicos`
 
 ```python
-def load_dynamic_neighborhoods() -> Neighborhoods:
+def carregar_bairros_dinamicos() -> Bairros:
 ```
 
-Essa função chama `load_neighborhoods`, definida em `neighborhoods.py`, para buscar os bairros de Maceió. Assim como a conexão MQTT, ela também usa retentativas. Se a API Overpass falhar temporariamente, o sensor tenta novamente.
+Essa função chama `carregar_bairros`, definida em `neighborhoods.py`, para carregar os bairros de Maceió. A função de bairros prioriza o cache local quando ele existe e `ATUALIZAR_BAIRROS_AO_INICIAR` está configurado como `false`. Assim, em execuções posteriores, a aplicação não precisa aguardar uma nova consulta ao Overpass para iniciar. Se o cache não existir, ou se a atualização for forçada, a API Overpass é consultada.
 
-Quando a busca funciona, a função imprime no terminal todos os bairros carregados com suas coordenadas.
+Quando o carregamento funciona, a função imprime no terminal todos os bairros disponíveis com suas coordenadas.
 
-### 4.7 Função `build_open_meteo_params`
+### 4.7 Função `montar_parametros_open_meteo`
 
 ```python
-def build_open_meteo_params(latitude: float, longitude: float) -> Dict[str, Union[str, float, bool]]:
+def montar_parametros_open_meteo(latitude: float, longitude: float) -> Dict[str, Union[str, float, bool]]:
 ```
 
 Essa função monta os parâmetros enviados para a API Open-Meteo. Ela recebe latitude e longitude e retorna um dicionário com:
@@ -221,20 +223,20 @@ Essa função monta os parâmetros enviados para a API Open-Meteo. Ela recebe la
 | `hourly` | Solicita séries horárias de temperatura, umidade, pressão, precipitação e vento |
 | `timezone` | Define o fuso horário da resposta |
 
-### 4.8 Função `find_current_hour_index`
+### 4.8 Função `encontrar_indice_hora_atual`
 
 ```python
-def find_current_hour_index(hourly: Dict[str, list], current_time: Optional[str]) -> int:
+def encontrar_indice_hora_atual(hourly: Dict[str, list], current_time: Optional[str]) -> int:
 ```
 
 A API Open-Meteo retorna listas de valores por horário. Essa função encontra qual posição da lista corresponde à hora atual. Para isso, ela compara o prefixo do timestamp atual com os horários disponíveis na resposta.
 
 Se não encontrar uma correspondência, retorna o índice `0` como fallback.
 
-### 4.9 Função `sum_precipitation`
+### 4.9 Função `somar_precipitacao`
 
 ```python
-def sum_precipitation(hourly: Dict[str, list], start_index: int, hours: int) -> float:
+def somar_precipitacao(hourly: Dict[str, list], start_index: int, hours: int) -> float:
 ```
 
 Essa função soma a precipitação prevista nas próximas horas a partir do índice horário atual. Ela é usada para calcular a previsão acumulada de chuva para as próximas 1h, 3h e 6h.
@@ -243,10 +245,10 @@ A previsão não é calculada por um modelo próprio do projeto. Ela vem do camp
 
 No dashboard, esses valores aparecem como `Chuva prevista 1h (mm)`, `Chuva prevista 3h (mm)` e `Chuva prevista 6h (mm)`. A unidade `mm` significa milímetros de chuva acumulada.
 
-### 4.10 Função `fetch_weather`
+### 4.10 Função `buscar_clima`
 
 ```python
-def fetch_weather(neighborhood: str, latitude: float, longitude: float) -> Optional[WeatherPayload]:
+def buscar_clima(neighborhood: str, latitude: float, longitude: float) -> Optional[PacoteClima]:
 ```
 
 Essa é uma das funções centrais do sensor. Ela realiza os seguintes passos:
@@ -280,22 +282,22 @@ O pacote retornado possui a seguinte estrutura:
 }
 ```
 
-Se a API climática falhar ou retornar uma estrutura inesperada, a função retorna `None`, evitando que uma mensagem inválida seja publicada.
+Se a API climática falhar, demorar mais que o timeout configurado ou retornar uma estrutura inesperada, a função retorna `None`, evitando que uma mensagem inválida seja publicada. No Docker Compose, o timeout foi configurado como 3 segundos para impedir que uma chamada lenta da Open-Meteo bloqueie por muito tempo a varredura dos bairros.
 
-### 4.11 Função `publish_weather`
+### 4.11 Função `publicar_clima`
 
 ```python
-def publish_weather(client: mqtt.Client, payload: WeatherPayload) -> bool:
+def publicar_clima(client: mqtt.Client, payload: PacoteClima) -> bool:
 ```
 
 Essa função recebe o cliente MQTT e o pacote climático, converte o pacote para JSON e publica no tópico configurado. O parâmetro `retain` indica se o broker deve manter a última mensagem publicada. No projeto, ele é configurado como `true`, permitindo que o dashboard receba a última leitura ao se conectar.
 
 A função também verifica o código de retorno da publicação MQTT. Se o cliente MQTT indicar falha, o erro é registrado no log e a função retorna `False`; caso contrário, retorna `True`.
 
-### 4.12 Função `run`
+### 4.12 Função `executar`
 
 ```python
-def run() -> None:
+def executar() -> None:
 ```
 
 Essa função coordena todo o ciclo do sensor:
@@ -306,13 +308,14 @@ Essa função coordena todo o ciclo do sensor:
 4. Percorre todos os bairros em ordem.
 5. Busca uma nova leitura climática para o bairro atual.
 6. Publica a leitura, caso seja válida.
-7. Aguarda o intervalo configurado antes de avançar para o próximo bairro.
+7. No primeiro ciclo, usa `SEGUNDOS_INTERVALO_PUBLICACAO_INICIAL`; por padrão, esse valor é 0, então não há pausa artificial entre bairros.
+8. Após a primeira volta, usa `SEGUNDOS_INTERVALO_PUBLICACAO` para controlar a cadência normal entre um bairro e o próximo.
 
 ### 4.13 Bloco principal
 
 ```python
 if __name__ == "__main__":
-    run()
+    executar()
 ```
 
 Esse bloco faz com que o sensor seja iniciado quando o arquivo `sensor.py` é executado diretamente.
@@ -324,34 +327,35 @@ O arquivo `neighborhoods.py` concentra a lógica de busca, limpeza e organizaç�
 ### 5.1 Tipos auxiliares
 
 ```python
-Coordinates = Tuple[float, float]
-Neighborhoods = Dict[str, Coordinates]
+Coordenadas = Tuple[float, float]
+Bairros = Dict[str, Coordenadas]
 ```
 
-`Coordinates` representa um par de latitude e longitude. `Neighborhoods` representa um dicionário em que a chave é o nome do bairro e o valor é o par de coordenadas.
+`Coordenadas` representa um par de latitude e longitude. `Bairros` representa um dicionário em que a chave é o nome do bairro e o valor é o par de coordenadas.
 
 ### 5.2 Configurações da API Overpass
 
 ```python
-OVERPASS_URL = os.getenv("OVERPASS_URL", "https://overpass-api.de/api/interpreter")
-CITY_NAME = os.getenv("CITY_NAME", "Maceió")
-STATE_NAME = os.getenv("STATE_NAME", "Alagoas")
-COUNTRY_NAME = os.getenv("COUNTRY_NAME", "Brasil")
+URL_OVERPASS = os.getenv("OVERPASS_URL", "https://overpass-api.de/api/interpreter")
+NOME_CIDADE = os.getenv("CITY_NAME", "Maceió")
+NOME_ESTADO = os.getenv("STATE_NAME", "Alagoas")
+NOME_PAIS = os.getenv("COUNTRY_NAME", "Brasil")
 ```
 
 Essas variáveis definem onde buscar os dados e qual cidade deve ser consultada.
 
 ```python
-OVERPASS_TIMEOUT_SECONDS = int(os.getenv("OVERPASS_TIMEOUT_SECONDS", "30"))
-NEIGHBORHOOD_CACHE_FILE = Path(os.getenv("NEIGHBORHOOD_CACHE_FILE", "neighborhoods_cache.json"))
+SEGUNDOS_TIMEOUT_OVERPASS = int(os.getenv("OVERPASS_TIMEOUT_SECONDS", "30"))
+ARQUIVO_CACHE_BAIRROS = Path(os.getenv("NEIGHBORHOOD_CACHE_FILE", "neighborhoods_cache.json"))
+ATUALIZAR_BAIRROS_AO_INICIAR = os.getenv("REFRESH_NEIGHBORHOODS_ON_START", "false").lower() == "true"
 ```
 
-`OVERPASS_TIMEOUT_SECONDS` define o tempo máximo da consulta ao Overpass. `NEIGHBORHOOD_CACHE_FILE` define onde a lista de bairros será salva em cache depois de uma busca bem-sucedida.
+`SEGUNDOS_TIMEOUT_OVERPASS` define o tempo máximo da consulta ao Overpass. `ARQUIVO_CACHE_BAIRROS` define onde a lista de bairros será salva em cache depois de uma busca bem-sucedida. `ATUALIZAR_BAIRROS_AO_INICIAR` controla se a aplicação deve forçar uma nova consulta ao Overpass ao iniciar. Quando essa variável está como `false`, o sistema usa o cache local primeiro.
 
 ### 5.3 Prefixos ignorados
 
 ```python
-IGNORED_NAME_PREFIXES = (
+PREFIXOS_NOMES_IGNORADOS = (
     "Condomínio ",
     "Conjunto ",
     "Loteamento ",
@@ -361,30 +365,30 @@ IGNORED_NAME_PREFIXES = (
 
 Alguns nomes retornados pelo OpenStreetMap podem representar condomínios, loteamentos ou conjuntos, e não bairros propriamente ditos. Esses prefixos são usados para filtrar esse tipo de resultado.
 
-### 5.4 Função `build_overpass_query`
+### 5.4 Função `montar_consulta_overpass`
 
 ```python
-def build_overpass_query() -> str:
+def montar_consulta_overpass() -> str:
 ```
 
 Essa função monta a consulta na linguagem Overpass QL. A consulta procura, dentro da área administrativa de Maceió, elementos classificados como `neighbourhood`, `suburb` ou `quarter`, além de algumas fronteiras administrativas menores.
 
 O resultado solicitado inclui centro e tags dos elementos, o que permite obter nome e coordenadas dos bairros.
 
-### 5.5 Função `get_element_coordinates`
+### 5.5 Função `obter_coordenadas_elemento`
 
 ```python
-def get_element_coordinates(element: dict) -> Coordinates:
+def obter_coordenadas_elemento(element: dict) -> Coordenadas:
 ```
 
 Essa função extrai as coordenadas de um elemento retornado pela API. Se o elemento possuir diretamente `lat` e `lon`, esses valores são usados. Caso contrário, a função tenta usar o campo `center`.
 
 Isso é necessário porque o Overpass pode retornar diferentes tipos de elementos, como nós, caminhos e relações.
 
-### 5.6 Função `is_valid_neighborhood_name`
+### 5.6 Função `nome_bairro_valido`
 
 ```python
-def is_valid_neighborhood_name(name: str) -> bool:
+def nome_bairro_valido(name: str) -> bool:
 ```
 
 Essa função verifica se o nome encontrado deve ser aceito. Ela rejeita:
@@ -393,54 +397,56 @@ Essa função verifica se o nome encontrado deve ser aceito. Ela rejeita:
 - nomes iguais à cidade, ao estado ou ao país;
 - nomes iniciados com prefixos ignorados, como `Condomínio` ou `Loteamento`.
 
-### 5.7 Função `normalize_neighborhood_name`
+### 5.7 Função `normalizar_nome_bairro`
 
 ```python
-def normalize_neighborhood_name(name: str) -> str:
+def normalizar_nome_bairro(name: str) -> str:
 ```
 
 Essa função limpa o nome do bairro. Se o nome começar com `Bairro `, esse prefixo é removido. Por exemplo, `Bairro Farol` vira apenas `Farol`.
 
-### 5.8 Função `load_cached_neighborhoods`
+### 5.8 Função `carregar_bairros_cache`
 
 ```python
-def load_cached_neighborhoods() -> Neighborhoods:
+def carregar_bairros_cache() -> Bairros:
 ```
 
 Essa função tenta carregar a lista de bairros a partir do arquivo de cache local. Se o arquivo não existir ou estiver inválido, retorna um dicionário vazio.
 
-### 5.9 Função `save_cached_neighborhoods`
+### 5.9 Função `salvar_bairros_cache`
 
 ```python
-def save_cached_neighborhoods(neighborhoods: Neighborhoods) -> None:
+def salvar_bairros_cache(neighborhoods: Bairros) -> None:
 ```
 
 Essa função salva os bairros carregados em um arquivo JSON. O cache reduz a dependência da API Overpass em execuções futuras e permite continuar usando a última lista válida caso a API externa falhe temporariamente.
 
-### 5.10 Função `load_neighborhoods`
+### 5.10 Função `carregar_bairros`
 
 ```python
-def load_neighborhoods() -> Neighborhoods:
+def carregar_bairros() -> Bairros:
 ```
 
 Essa é a função principal do arquivo. Ela:
 
-1. Envia uma requisição POST para a API Overpass.
-2. Recebe a resposta em JSON.
-3. Percorre os elementos retornados.
-4. Extrai o nome de cada bairro.
-5. Normaliza e valida o nome.
-6. Extrai as coordenadas.
-7. Armazena o bairro em um dicionário.
-8. Salva os bairros em cache local.
-9. Retorna os bairros ordenados por nome.
+1. Tenta carregar a lista do cache local.
+2. Se o cache existir e `ATUALIZAR_BAIRROS_AO_INICIAR=false`, retorna imediatamente os bairros salvos.
+3. Se não houver cache ou se a atualização for forçada, envia uma requisição POST para a API Overpass.
+4. Recebe a resposta em JSON.
+5. Percorre os elementos retornados.
+6. Extrai o nome de cada bairro.
+7. Normaliza e valida o nome.
+8. Extrai as coordenadas.
+9. Armazena o bairro em um dicionário.
+10. Salva os bairros em cache local.
+11. Retorna os bairros ordenados por nome.
 
-Caso algum elemento venha incompleto ou com coordenadas inválidas, ele é ignorado. Se a consulta ao Overpass falhar, a função tenta carregar os bairros do cache local.
+Caso algum elemento venha incompleto ou com coordenadas inválidas, ele é ignorado. Se a consulta ao Overpass falhar, a função tenta reutilizar o cache local, caso ele exista.
 
-### 5.11 Função `format_neighborhoods`
+### 5.11 Função `formatar_bairros`
 
 ```python
-def format_neighborhoods(neighborhoods: Neighborhoods) -> List[str]:
+def formatar_bairros(neighborhoods: Bairros) -> List[str]:
 ```
 
 Essa função formata os bairros para exibição no terminal. Ela retorna uma lista de strings no formato:
@@ -489,35 +495,35 @@ As principais bibliotecas usadas são:
 ### 6.2 Configurações globais
 
 ```python
-MQTT_BROKER = os.getenv("MQTT_BROKER", "mqtt-broker")
-MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
-MQTT_TOPIC = os.getenv("MQTT_TOPIC", "iot/chuva")
+BROKER_MQTT = os.getenv("MQTT_BROKER", "mqtt-broker")
+PORTA_MQTT = int(os.getenv("MQTT_PORT", "1883"))
+TOPICO_MQTT = os.getenv("MQTT_TOPIC", "iot/chuva")
 ```
 
 Essas variáveis definem a conexão MQTT do dashboard.
 
 ```python
-MAX_HISTORY_ROWS = 500
-RECENT_HISTORY_ROWS = 24
-AUTO_REFRESH_SECONDS = 2
+MAXIMO_LINHAS_HISTORICO = 500
+LINHAS_HISTORICO_RECENTE = 24
+SEGUNDOS_ATUALIZACAO_AUTOMATICA = 2
 ```
 
 Essas constantes definem:
 
 | Constante | Significado |
 | --- | --- |
-| `MAX_HISTORY_ROWS` | Quantidade máxima de mensagens guardadas em memória |
-| `RECENT_HISTORY_ROWS` | Quantidade de registros usados para cálculos recentes |
-| `AUTO_REFRESH_SECONDS` | Intervalo de atualização automática da tela |
+| `MAXIMO_LINHAS_HISTORICO` | Quantidade máxima de mensagens guardadas em memória |
+| `LINHAS_HISTORICO_RECENTE` | Quantidade de registros usados para cálculos recentes |
+| `SEGUNDOS_ATUALIZACAO_AUTOMATICA` | Intervalo de atualização automática da tela |
 
 ### 6.3 Colunas de dados
 
 ```python
-TABLE_COLUMNS = [...]
-DATA_COLUMNS = {...}
+COLUNAS_TABELA = [...]
+COLUNAS_DADOS = {...}
 ```
 
-`TABLE_COLUMNS` define as colunas exibidas na tabela de histórico. `DATA_COLUMNS` define o mapeamento entre os nomes internos usados pelo código e os nomes amigáveis exibidos no dashboard.
+`COLUNAS_TABELA` define as colunas exibidas na tabela de histórico. `COLUNAS_DADOS` define o mapeamento entre os nomes internos usados pelo código e os nomes amigáveis exibidos no dashboard.
 
 ### 6.4 Classe `MqttRuntime`
 
@@ -537,26 +543,26 @@ Essa classe agrupa os objetos necessários para a execução MQTT:
 
 O `Lock` é importante porque o MQTT recebe mensagens em uma thread separada, enquanto o Streamlit renderiza a interface na thread principal.
 
-### 6.5 Função `configure_page`
+### 6.5 Função `configurar_pagina`
 
 ```python
-def configure_page() -> None:
+def configurar_pagina() -> None:
 ```
 
 Configura a página Streamlit com título, ícone, layout largo e texto introdutório.
 
-### 6.6 Função `parse_float`
+### 6.6 Função `converter_float`
 
 ```python
-def parse_float(data: Dict[str, Any], key: str, default: float) -> float:
+def converter_float(data: Dict[str, Any], key: str, default: float) -> float:
 ```
 
 Essa função tenta converter um campo para `float`. Se o valor estiver ausente ou inválido, retorna um valor padrão. Isso evita que o dashboard quebre ao receber uma mensagem incompleta.
 
-### 6.7 Função `parse_message`
+### 6.7 Função `processar_mensagem`
 
 ```python
-def parse_message(payload: bytes) -> Dict[str, Any]:
+def processar_mensagem(payload: bytes) -> Dict[str, Any]:
 ```
 
 Essa função recebe o conteúdo bruto da mensagem MQTT, decodifica o JSON e transforma os campos no formato interno usado pelo dashboard.
@@ -575,26 +581,26 @@ Ela converte, por exemplo:
 
 Também mantém o JSON original no campo `raw`, que depois é exibido no dashboard como “Último pacote MQTT recebido”.
 
-### 6.8 Função `on_message`
+### 6.8 Função `ao_receber_mensagem`
 
 ```python
-def on_message(client: mqtt.Client, runtime: MqttRuntime, message: mqtt.MQTTMessage) -> None:
+def ao_receber_mensagem(client: mqtt.Client, runtime: MqttRuntime, message: mqtt.MQTTMessage) -> None:
 ```
 
 Essa função é chamada automaticamente sempre que uma mensagem MQTT chega. Ela:
 
-1. Chama `parse_message`.
+1. Chama `processar_mensagem`.
 2. Adiciona a mensagem convertida ao histórico.
 3. Usa `runtime.lock` para proteger a alteração.
 4. Imprime a mensagem recebida nos logs.
 
 Se a mensagem vier com JSON inválido, o erro é capturado e registrado no terminal.
 
-### 6.9 Função `get_mqtt_runtime`
+### 6.9 Função `obter_runtime_mqtt`
 
 ```python
 @st.cache_resource
-def get_mqtt_runtime() -> MqttRuntime:
+def obter_runtime_mqtt() -> MqttRuntime:
 ```
 
 Essa função cria e configura a conexão MQTT do dashboard. Ela:
@@ -602,59 +608,59 @@ Essa função cria e configura a conexão MQTT do dashboard. Ela:
 1. Cria o cliente MQTT.
 2. Cria o `MqttRuntime`.
 3. Associa o runtime ao cliente com `user_data_set`.
-4. Define `on_message` como callback.
+4. Define `ao_receber_mensagem` como callback.
 5. Tenta conectar ao broker.
 6. Assina o tópico `iot/chuva`.
 7. Inicia o loop MQTT em segundo plano.
 
 O decorador `@st.cache_resource` evita que uma nova conexão MQTT seja criada a cada atualização do Streamlit.
 
-### 6.10 Função `get_history_rows`
+### 6.10 Função `obter_linhas_historico`
 
 ```python
-def get_history_rows(runtime: MqttRuntime) -> List[Dict[str, Any]]:
+def obter_linhas_historico(runtime: MqttRuntime) -> List[Dict[str, Any]]:
 ```
 
 Essa função copia o histórico de mensagens de forma segura e converte cada mensagem para um dicionário com os nomes das colunas que serão exibidas no dashboard.
 
-### 6.11 Função `build_dataframe`
+### 6.11 Função `montar_dataframe`
 
 ```python
-def build_dataframe(rows: List[Dict[str, Any]]) -> pd.DataFrame:
+def montar_dataframe(rows: List[Dict[str, Any]]) -> pd.DataFrame:
 ```
 
 Essa função transforma a lista de mensagens em um `DataFrame` do Pandas. Também converte a coluna `Data/Hora` para tipo de data e remove registros com timestamp inválido.
 
-### 6.12 Função `classify_status`
+### 6.12 Função `classificar_status`
 
 ```python
-def classify_status(rain: float, wind: float, humidity: float) -> str:
+def classificar_status(rain: float, wind: float, humidity: float) -> str:
 ```
 
 Centraliza as regras de classificação climática. Essa função evita repetição de lógica no dashboard, pois tanto a classificação da última leitura por bairro quanto a classificação da situação geral usam os mesmos limites de chuva, vento e umidade.
 
-### 6.13 Função `describe_rain_condition`
+### 6.13 Função `descrever_condicao_chuva`
 
 ```python
-def describe_rain_condition(row: pd.Series) -> str:
+def descrever_condicao_chuva(row: pd.Series) -> str:
 ```
 
 Converte os valores numéricos de chuva em uma mensagem simples para o usuário. Em vez de mostrar apenas valores em milímetros, o dashboard também exibe interpretações como `Chuva fraca agora`, `Pode chover em breve`, `Pode chover nas próximas 3h` ou `Sem chuva prevista`.
 
 Essa função ajuda usuários não técnicos a entenderem se está chovendo no momento, se pode chover nas próximas horas ou se não há chuva prevista.
 
-### 6.14 Função `classify_latest_row`
+### 6.14 Função `classificar_linha_recente`
 
 ```python
-def classify_latest_row(row: pd.Series) -> str:
+def classificar_linha_recente(row: pd.Series) -> str:
 ```
 
 Classifica a última leitura de um bairro específico. A regra considera a chuva observada, a previsão de chuva para a próxima hora, o vento e a umidade. Chuva igual ou superior a 3 mm, previsão de chuva da próxima hora igual ou superior a 3 mm ou vento igual ou superior a 45 km/h gera `Alerta`; chuva maior que 0 mm, previsão de chuva maior que 0 mm ou umidade igual ou superior a 80% gera `Atenção`; caso contrário, o status é `Normal`.
 
-### 6.15 Função `build_latest_by_neighborhood`
+### 6.15 Função `montar_ultimas_por_bairro`
 
 ```python
-def build_latest_by_neighborhood(dataframe: pd.DataFrame) -> pd.DataFrame:
+def montar_ultimas_por_bairro(dataframe: pd.DataFrame) -> pd.DataFrame:
 ```
 
 Monta uma tabela consolidada com apenas a leitura mais recente de cada bairro. Para isso, ordena os dados por data/hora, remove leituras antigas mantendo a última ocorrência de cada local e adiciona as colunas `Status` e `Interpretação da chuva`.
@@ -755,10 +761,10 @@ def render_history(dataframe: pd.DataFrame, latest: pd.Series) -> None:
 
 Renderiza a tabela com os 20 registros mais recentes e também exibe o último pacote MQTT bruto em JSON.
 
-### 6.25 Função `render_dashboard`
+### 6.25 Função `renderizar_dashboard`
 
 ```python
-def render_dashboard(runtime: MqttRuntime) -> None:
+def renderizar_dashboard(runtime: MqttRuntime) -> None:
 ```
 
 Essa função organiza a renderização completa do dashboard. Ela:
@@ -771,10 +777,10 @@ Essa função organiza a renderização completa do dashboard. Ela:
 6. Seleciona a última leitura.
 7. Renderiza resumo, situação atual, gráficos e histórico.
 
-### 6.26 Função `main`
+### 6.26 Função `principal`
 
 ```python
-def main() -> None:
+def principal() -> None:
 ```
 
 Função principal do dashboard. Ela configura a página, inicializa o runtime MQTT, renderiza o dashboard, aguarda 2 segundos e força a atualização da tela com `st.rerun()`.
@@ -782,7 +788,7 @@ Função principal do dashboard. Ela configura a página, inicializa o runtime M
 ### 6.27 Chamada final
 
 ```python
-main()
+principal()
 ```
 
 Inicia o dashboard quando o arquivo é executado pelo Streamlit.
@@ -835,12 +841,15 @@ Principais variáveis de ambiente:
 | `MQTT_PORT` | `1883` | Porta MQTT |
 | `MQTT_TOPIC` | `iot/chuva` | Tópico onde as mensagens são publicadas |
 | `MQTT_RETAIN` | `true` | Mantém última mensagem no broker |
+| `INITIAL_PUBLISH_INTERVAL_SECONDS` | `0` | Intervalo entre bairros no primeiro ciclo; 0 acelera o preenchimento inicial do dashboard |
 | `PUBLISH_INTERVAL_SECONDS` | `5` | Intervalo entre a consulta/publicação de um bairro e o próximo |
+| `OPEN_METEO_TIMEOUT_SECONDS` | `3` | Tempo máximo de espera por resposta da Open-Meteo |
 | `CITY_NAME` | `Maceió` | Cidade usada na busca dos bairros |
 | `STATE_NAME` | `Alagoas` | Estado usado para validação |
 | `COUNTRY_NAME` | `Brasil` | País usado para validação |
 | `OVERPASS_URL` | URL da Overpass | Endpoint de busca geográfica |
 | `NEIGHBORHOOD_CACHE_FILE` | `/app/cache/neighborhoods_cache.json` | Arquivo usado para salvar e reutilizar o cache de bairros |
+| `REFRESH_NEIGHBORHOODS_ON_START` | `false` | Quando `false`, usa o cache de bairros antes de consultar o Overpass |
 
 ### 7.3 Serviço `dashboard`
 
@@ -860,7 +869,7 @@ Esse serviço executa o dashboard Streamlit e expõe a porta `8501`, permitindo 
 http://localhost:8501
 ```
 
-O dashboard usa as variáveis `MQTT_BROKER`, `MQTT_PORT` e `MQTT_TOPIC` para assinar o mesmo tópico em que o sensor publica.
+O dashboard usa as variáveis de ambiente `MQTT_BROKER`, `MQTT_PORT` e `MQTT_TOPIC` para assinar o mesmo tópico em que o sensor publica.
 
 ## 8. Funcionamento dos Dockerfiles
 
@@ -902,7 +911,7 @@ COPY dashboard_web.py .
 
 EXPOSE 8501
 
-CMD ["streamlit", "run", "dashboard_web.py", "--server.address=0.0.0.0"]
+CMD ["streamlit", "executar", "dashboard_web.py", "--server.address=0.0.0.0"]
 ```
 
 Esse Dockerfile:
@@ -1030,11 +1039,11 @@ docker compose down
 
 O sistema possui uma arquitetura simples e coerente com aplicações IoT. O uso de MQTT é adequado porque permite comunicação leve entre produtor e consumidor de dados. A separação entre sensor, broker e dashboard facilita manutenção e testes. Além disso, o Docker Compose torna o ambiente fácil de reproduzir.
 
-Outro ponto positivo é a busca dinâmica de bairros. Em vez de manter uma lista fixa no código, o sistema consulta o OpenStreetMap/Overpass, obtendo nomes e coordenadas atualizados. Após a primeira busca bem-sucedida, a lista é salva em cache local, reduzindo a dependência da API geográfica em execuções futuras. O dashboard também apresenta informações em diferentes formatos, como cards, previsão de chuva para as próximas horas, gráficos, tabela histórica e JSON bruto.
+Outro ponto positivo é a busca dinâmica de bairros com cache local. Em vez de manter uma lista fixa no código, o sistema pode consultar o OpenStreetMap/Overpass, obtendo nomes e coordenadas atualizados. Após a primeira busca bem-sucedida, a lista é salva em cache local e passa a ser usada primeiro nas próximas execuções, reduzindo o tempo de inicialização e a dependência da API geográfica. O sensor também publica o primeiro ciclo sem pausa artificial entre bairros, acelerando o preenchimento inicial do dashboard. O dashboard apresenta informações em diferentes formatos, como cards, previsão de chuva para as próximas horas, gráficos, tabela histórica e JSON bruto.
 
 ## 15. Limitações e possíveis melhorias
 
-Apesar de funcional, a aplicação depende de APIs externas. Se a Open-Meteo estiver indisponível, o sensor pode falhar temporariamente ou deixar de publicar novas leituras climáticas. No caso da Overpass, o projeto já reduz esse risco usando retentativas e cache local dos bairros após a primeira busca bem-sucedida.
+Apesar de funcional, a aplicação depende de APIs externas. Se a Open-Meteo estiver indisponível, o sensor pode deixar de publicar leituras para alguns bairros naquele ciclo. Para reduzir o bloqueio causado por lentidão externa, o timeout da Open-Meteo foi parametrizado por `SEGUNDOS_TIMEOUT_OPEN_METEO`; no Docker Compose, ele está definido como 3 segundos. No caso da Overpass, o projeto reduz o risco usando retentativas e cache local dos bairros após a primeira busca bem-sucedida.
 
 Outra melhoria seria persistir o histórico em banco de dados. Atualmente, o dashboard mantém os dados apenas em memória. Se o container for reiniciado, o histórico é perdido. Para trabalhos futuros, poderiam ser usados SQLite, PostgreSQL, InfluxDB ou outro banco adequado para séries temporais.
 

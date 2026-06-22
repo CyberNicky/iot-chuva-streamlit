@@ -6,17 +6,18 @@ from typing import Dict, List, Tuple
 import requests
 
 
-Coordinates = Tuple[float, float]
-Neighborhoods = Dict[str, Coordinates]
+Coordenadas = Tuple[float, float]
+Bairros = Dict[str, Coordenadas]
 
-OVERPASS_URL = os.getenv("OVERPASS_URL", "https://overpass-api.de/api/interpreter")
-CITY_NAME = os.getenv("CITY_NAME", "Maceió")
-STATE_NAME = os.getenv("STATE_NAME", "Alagoas")
-COUNTRY_NAME = os.getenv("COUNTRY_NAME", "Brasil")
+URL_OVERPASS = os.getenv("OVERPASS_URL", "https://overpass-api.de/api/interpreter")
+NOME_CIDADE = os.getenv("CITY_NAME", "Maceió")
+NOME_ESTADO = os.getenv("STATE_NAME", "Alagoas")
+NOME_PAIS = os.getenv("COUNTRY_NAME", "Brasil")
 
-OVERPASS_TIMEOUT_SECONDS = int(os.getenv("OVERPASS_TIMEOUT_SECONDS", "30"))
-NEIGHBORHOOD_CACHE_FILE = Path(os.getenv("NEIGHBORHOOD_CACHE_FILE", "neighborhoods_cache.json"))
-IGNORED_NAME_PREFIXES = (
+SEGUNDOS_TIMEOUT_OVERPASS = int(os.getenv("OVERPASS_TIMEOUT_SECONDS", "30"))
+ARQUIVO_CACHE_BAIRROS = Path(os.getenv("NEIGHBORHOOD_CACHE_FILE", "neighborhoods_cache.json"))
+ATUALIZAR_BAIRROS_AO_INICIAR = os.getenv("REFRESH_NEIGHBORHOODS_ON_START", "false").lower() == "true"
+PREFIXOS_NOMES_IGNORADOS = (
     "Condomínio ",
     "Conjunto ",
     "Loteamento ",
@@ -24,10 +25,10 @@ IGNORED_NAME_PREFIXES = (
 )
 
 
-def build_overpass_query() -> str:
+def montar_consulta_overpass() -> str:
     return f"""
-    [out:json][timeout:{OVERPASS_TIMEOUT_SECONDS}];
-    area["boundary"="administrative"]["name"="{CITY_NAME}"]["admin_level"="8"]->.city;
+    [out:json][timeout:{SEGUNDOS_TIMEOUT_OVERPASS}];
+    area["boundary"="administrative"]["name"="{NOME_CIDADE}"]["admin_level"="8"]->.city;
     (
       nwr(area.city)["place"~"^(neighbourhood|suburb|quarter)$"]["name"];
       nwr(area.city)["boundary"="administrative"]["name"]["admin_level"~"^(9|10|11)$"];
@@ -36,99 +37,102 @@ def build_overpass_query() -> str:
     """
 
 
-def get_element_coordinates(element: dict) -> Coordinates:
-    if "lat" in element and "lon" in element:
-        return float(element["lat"]), float(element["lon"])
+def obter_coordenadas_elemento(elemento: dict) -> Coordenadas:
+    if "lat" in elemento and "lon" in elemento:
+        return float(elemento["lat"]), float(elemento["lon"])
 
-    center = element.get("center", {})
-    return float(center["lat"]), float(center["lon"])
+    centro = elemento.get("center", {})
+    return float(centro["lat"]), float(centro["lon"])
 
 
-def is_valid_neighborhood_name(name: str) -> bool:
-    normalized = name.strip().lower()
-    blocked_names = {
-        CITY_NAME.lower(),
-        STATE_NAME.lower(),
-        COUNTRY_NAME.lower(),
+def nome_bairro_valido(nome: str) -> bool:
+    normalizado = nome.strip().lower()
+    nomes_bloqueados = {
+        NOME_CIDADE.lower(),
+        NOME_ESTADO.lower(),
+        NOME_PAIS.lower(),
     }
     return (
-        bool(normalized)
-        and normalized not in blocked_names
-        and not name.startswith(IGNORED_NAME_PREFIXES)
+        bool(normalizado)
+        and normalizado not in nomes_bloqueados
+        and not nome.startswith(PREFIXOS_NOMES_IGNORADOS)
     )
 
 
-def normalize_neighborhood_name(name: str) -> str:
-    name = name.strip()
-    if name.startswith("Bairro "):
-        return name.removeprefix("Bairro ").strip()
-    return name
+def normalizar_nome_bairro(nome: str) -> str:
+    nome = nome.strip()
+    if nome.startswith("Bairro "):
+        return nome.removeprefix("Bairro ").strip()
+    return nome
 
 
-def load_cached_neighborhoods() -> Neighborhoods:
-    if not NEIGHBORHOOD_CACHE_FILE.exists():
+def carregar_bairros_cache() -> Bairros:
+    if not ARQUIVO_CACHE_BAIRROS.exists():
         return {}
 
     try:
-        data = json.loads(NEIGHBORHOOD_CACHE_FILE.read_text(encoding="utf-8"))
+        dados = json.loads(ARQUIVO_CACHE_BAIRROS.read_text(encoding="utf-8"))
         return {
-            str(name): (float(coordinates[0]), float(coordinates[1]))
-            for name, coordinates in data.items()
+            str(nome): (float(coordenadas[0]), float(coordenadas[1]))
+            for nome, coordenadas in dados.items()
         }
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         return {}
 
 
-def save_cached_neighborhoods(neighborhoods: Neighborhoods) -> None:
+def salvar_bairros_cache(bairros: Bairros) -> None:
     try:
-        NEIGHBORHOOD_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        NEIGHBORHOOD_CACHE_FILE.write_text(
-            json.dumps(neighborhoods, ensure_ascii=False, indent=2),
+        ARQUIVO_CACHE_BAIRROS.parent.mkdir(parents=True, exist_ok=True)
+        ARQUIVO_CACHE_BAIRROS.write_text(
+            json.dumps(bairros, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-    except OSError as error:
-        print(f"Não foi possível salvar cache de bairros: {error}")
+    except OSError as erro:
+        print(f"Não foi possível salvar cache de bairros: {erro}")
 
 
-def load_neighborhoods() -> Neighborhoods:
+def carregar_bairros() -> Bairros:
+    cacheado = carregar_bairros_cache()
+    if cacheado and not ATUALIZAR_BAIRROS_AO_INICIAR:
+        print(f"{len(cacheado)} bairros carregados do cache local.")
+        return cacheado
+
     try:
-        response = requests.post(
-            OVERPASS_URL,
-            data={"data": build_overpass_query()},
-            timeout=OVERPASS_TIMEOUT_SECONDS + 5,
+        resposta = requests.post(
+            URL_OVERPASS,
+            data={"data": montar_consulta_overpass()},
+            timeout=SEGUNDOS_TIMEOUT_OVERPASS + 5,
             headers={"User-Agent": "projeto-sensoriamento-maceio/1.0"},
         )
-        response.raise_for_status()
-        data = response.json()
+        resposta.raise_for_status()
+        dados = resposta.json()
     except (requests.RequestException, ValueError):
-        cached = load_cached_neighborhoods()
-        if cached:
-            print(f"{len(cached)} bairros carregados do cache local.")
-            return cached
+        if cacheado:
+            print(f"{len(cacheado)} bairros carregados do cache local.")
+            return cacheado
         raise
 
-    neighborhoods: Neighborhoods = {}
-    for element in data.get("elements", []):
-        tags = element.get("tags", {})
-        name = normalize_neighborhood_name(tags.get("name", ""))
-        if not name or not is_valid_neighborhood_name(name):
+    bairros: Bairros = {}
+    for elemento in dados.get("elements", []):
+        etiquetas = elemento.get("tags", {})
+        nome = normalizar_nome_bairro(etiquetas.get("name", ""))
+        if not nome or not nome_bairro_valido(nome):
             continue
 
         try:
-            neighborhoods[name.strip()] = get_element_coordinates(element)
+            bairros[nome.strip()] = obter_coordenadas_elemento(elemento)
         except (KeyError, TypeError, ValueError):
             continue
 
-    neighborhoods = dict(sorted(neighborhoods.items()))
-    if neighborhoods:
-        save_cached_neighborhoods(neighborhoods)
-        return neighborhoods
+    bairros = dict(sorted(bairros.items()))
+    if bairros:
+        salvar_bairros_cache(bairros)
+        return bairros
 
-    cached = load_cached_neighborhoods()
-    if cached:
-        print(f"{len(cached)} bairros carregados do cache local.")
-    return cached
+    if cacheado:
+        print(f"{len(cacheado)} bairros carregados do cache local.")
+    return cacheado
 
 
-def format_neighborhoods(neighborhoods: Neighborhoods) -> List[str]:
-    return [f"{name} ({lat:.5f}, {lon:.5f})" for name, (lat, lon) in neighborhoods.items()]
+def formatar_bairros(bairros: Bairros) -> List[str]:
+    return [f"{nome} ({lat:.5f}, {lon:.5f})" for nome, (lat, lon) in bairros.items()]

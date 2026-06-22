@@ -10,6 +10,7 @@ Projeto de monitoramento de clima em Maceió usando OpenStreetMap/Overpass, Open
 
 ## O que aparece no dashboard
 
+- Layout revisado com foco em IHC: painel escuro operacional, hierarquia visual clara, status do sistema no topo, filtros em área lateral, textos objetivos, contraste melhorado e estados de espera/erro mais compreensíveis.
 - Resumo atual com temperatura, umidade, chuva, vento, local, horário e pressão.
 - Filtro para visualizar todos os bairros ou um bairro específico.
 - Tabela com a última leitura disponível de cada bairro já percorrido pelo sensor.

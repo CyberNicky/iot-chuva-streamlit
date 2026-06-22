@@ -8,26 +8,28 @@ from zoneinfo import ZoneInfo
 import paho.mqtt.client as mqtt
 import requests
 
-from neighborhoods import Neighborhoods, format_neighborhoods, load_neighborhoods
+from neighborhoods import Bairros, formatar_bairros, carregar_bairros
 
 
-MQTT_BROKER = os.getenv("MQTT_BROKER", "mosquitto")
-MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
-MQTT_TOPIC = os.getenv("MQTT_TOPIC", "iot/chuva")
-MQTT_RETAIN = os.getenv("MQTT_RETAIN", "true").lower() == "true"
-APP_TIMEZONE = os.getenv("APP_TIMEZONE", "America/Maceio")
-APP_TZ = ZoneInfo(APP_TIMEZONE)
+BROKER_MQTT = os.getenv("MQTT_BROKER", "mosquitto")
+PORTA_MQTT = int(os.getenv("MQTT_PORT", "1883"))
+TOPICO_MQTT = os.getenv("MQTT_TOPIC", "iot/chuva")
+RETER_MQTT = os.getenv("MQTT_RETAIN", "true").lower() == "true"
+FUSO_HORARIO_APP = os.getenv("APP_TIMEZONE", "America/Maceio")
+FUSO_APP = ZoneInfo(FUSO_HORARIO_APP)
 
-OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
-OPEN_METEO_TIMEZONE = APP_TIMEZONE
-PUBLISH_INTERVAL_SECONDS = int(os.getenv("PUBLISH_INTERVAL_SECONDS", "60"))
-MAX_MQTT_RETRIES = 10
-MQTT_RETRY_DELAY_SECONDS = 2
-MAX_NEIGHBORHOOD_RETRIES = 10
-NEIGHBORHOOD_RETRY_DELAY_SECONDS = 5
+URL_OPEN_METEO = "https://api.open-meteo.com/v1/forecast"
+FUSO_HORARIO_OPEN_METEO = FUSO_HORARIO_APP
+SEGUNDOS_TIMEOUT_OPEN_METEO = int(os.getenv("OPEN_METEO_TIMEOUT_SECONDS", "5"))
+SEGUNDOS_INTERVALO_PUBLICACAO = int(os.getenv("PUBLISH_INTERVAL_SECONDS", "60"))
+SEGUNDOS_INTERVALO_PUBLICACAO_INICIAL = int(os.getenv("INITIAL_PUBLISH_INTERVAL_SECONDS", "0"))
+MAXIMO_TENTATIVAS_MQTT = 10
+SEGUNDOS_ESPERA_TENTATIVA_MQTT = 2
+MAXIMO_TENTATIVAS_BAIRROS = 10
+SEGUNDOS_ESPERA_TENTATIVA_BAIRROS = 5
 
-WeatherPayload = Dict[str, Union[float, int, str]]
-OPEN_METEO_HOURLY_FIELDS = ",".join(
+PacoteClima = Dict[str, Union[float, int, str]]
+CAMPOS_HORARIOS_OPEN_METEO = ",".join(
     [
         "temperature_2m",
         "relativehumidity_2m",
@@ -37,7 +39,7 @@ OPEN_METEO_HOURLY_FIELDS = ",".join(
     ]
 )
 
-WEEKDAYS_PT = {
+DIAS_SEMANA_PT = {
     0: "segunda-feira",
     1: "terça-feira",
     2: "quarta-feira",
@@ -47,137 +49,141 @@ WEEKDAYS_PT = {
     6: "domingo",
 }
 
-def connect_mqtt() -> mqtt.Client:
-    client = mqtt.Client()
+def conectar_mqtt() -> mqtt.Client:
+    cliente = mqtt.Client()
 
-    for attempt in range(1, MAX_MQTT_RETRIES + 1):
+    for tentativa in range(1, MAXIMO_TENTATIVAS_MQTT + 1):
         try:
-            print(f"Conectando ao MQTT ({attempt}/{MAX_MQTT_RETRIES})...")
-            client.connect(MQTT_BROKER, MQTT_PORT)
+            print(f"Conectando ao MQTT ({tentativa}/{MAXIMO_TENTATIVAS_MQTT})...")
+            cliente.connect(BROKER_MQTT, PORTA_MQTT)
             print("MQTT conectado.")
-            return client
-        except Exception as error:
-            print(f"Falha ao conectar no MQTT: {error}")
-            time.sleep(MQTT_RETRY_DELAY_SECONDS)
+            return cliente
+        except Exception as erro:
+            print(f"Falha ao conectar no MQTT: {erro}")
+            time.sleep(SEGUNDOS_ESPERA_TENTATIVA_MQTT)
 
     raise RuntimeError("Não foi possível conectar ao broker MQTT.")
 
 
-def load_dynamic_neighborhoods() -> Neighborhoods:
-    for attempt in range(1, MAX_NEIGHBORHOOD_RETRIES + 1):
+def carregar_bairros_dinamicos() -> Bairros:
+    for tentativa in range(1, MAXIMO_TENTATIVAS_BAIRROS + 1):
         try:
-            print(f"Buscando bairros dinamicamente ({attempt}/{MAX_NEIGHBORHOOD_RETRIES})...")
-            neighborhoods = load_neighborhoods()
-            if not neighborhoods:
+            print(f"Buscando bairros dinamicamente ({tentativa}/{MAXIMO_TENTATIVAS_BAIRROS})...")
+            bairros = carregar_bairros()
+            if not bairros:
                 raise RuntimeError("A consulta não retornou bairros.")
 
-            print(f"{len(neighborhoods)} bairros carregados via OpenStreetMap/Overpass:")
-            for neighborhood in format_neighborhoods(neighborhoods):
-                print(f"- {neighborhood}")
-            return neighborhoods
-        except requests.RequestException as error:
-            print(f"Falha ao buscar bairros no OpenStreetMap/Overpass: {error}")
-        except RuntimeError as error:
-            print(f"Falha ao carregar bairros: {error}")
+            print(f"{len(bairros)} bairros disponíveis para monitoramento:")
+            for bairro in formatar_bairros(bairros):
+                print(f"- {bairro}")
+            return bairros
+        except requests.RequestException as erro:
+            print(f"Falha ao buscar bairros no OpenStreetMap/Overpass: {erro}")
+        except RuntimeError as erro:
+            print(f"Falha ao carregar bairros: {erro}")
 
-        time.sleep(NEIGHBORHOOD_RETRY_DELAY_SECONDS)
+        time.sleep(SEGUNDOS_ESPERA_TENTATIVA_BAIRROS)
 
     raise RuntimeError("Não foi possível carregar bairros dinamicamente.")
 
 
-def build_open_meteo_params(latitude: float, longitude: float) -> Dict[str, Union[str, float, bool]]:
+def montar_parametros_open_meteo(latitude: float, longitude: float) -> Dict[str, Union[str, float, bool]]:
     return {
         "latitude": latitude,
         "longitude": longitude,
         "current_weather": True,
-        "hourly": OPEN_METEO_HOURLY_FIELDS,
-        "timezone": OPEN_METEO_TIMEZONE,
+        "hourly": CAMPOS_HORARIOS_OPEN_METEO,
+        "timezone": FUSO_HORARIO_OPEN_METEO,
     }
 
 
-def find_current_hour_index(hourly: Dict[str, list], current_time: Optional[str]) -> int:
-    if not current_time:
+def encontrar_indice_hora_atual(dados_horarios: Dict[str, list], hora_atual: Optional[str]) -> int:
+    if not hora_atual:
         return 0
 
-    current_hour = current_time[:13]
-    for index, timestamp in enumerate(hourly.get("time", [])):
-        if timestamp.startswith(current_hour):
-            return index
+    hora_corrente = hora_atual[:13]
+    for indice, marcador_tempo in enumerate(dados_horarios.get("time", [])):
+        if marcador_tempo.startswith(hora_corrente):
+            return indice
 
     return 0
 
 
-def sum_precipitation(hourly: Dict[str, list], start_index: int, hours: int) -> float:
-    precipitation = hourly.get("precipitation", [])
-    values = precipitation[start_index + 1 : start_index + 1 + hours]
-    return round(sum(float(value) for value in values), 2)
+def somar_precipitacao(dados_horarios: Dict[str, list], indice_inicial: int, horas: int) -> float:
+    precipitacao = dados_horarios.get("precipitation", [])
+    valores = precipitacao[indice_inicial + 1 : indice_inicial + 1 + horas]
+    return round(sum(float(valor) for valor in valores), 2)
 
 
-def fetch_weather(neighborhood: str, latitude: float, longitude: float) -> Optional[WeatherPayload]:
+def buscar_clima(bairro: str, latitude: float, longitude: float) -> Optional[PacoteClima]:
     try:
-        response = requests.get(
-            OPEN_METEO_URL,
-            params=build_open_meteo_params(latitude, longitude),
-            timeout=10,
+        resposta = requests.get(
+            URL_OPEN_METEO,
+            params=montar_parametros_open_meteo(latitude, longitude),
+            timeout=SEGUNDOS_TIMEOUT_OPEN_METEO,
         )
-        response.raise_for_status()
-        data = response.json()
-    except requests.RequestException as error:
-        print(f"Falha ao consultar Open-Meteo: {error}")
+        resposta.raise_for_status()
+        dados = resposta.json()
+    except requests.RequestException as erro:
+        print(f"Falha ao consultar Open-Meteo: {erro}")
         return None
 
-    current_weather = data.get("current_weather", {})
-    hourly = data.get("hourly", {})
-    index = find_current_hour_index(hourly, current_weather.get("time"))
-    now = datetime.now(APP_TZ)
+    clima_atual = dados.get("current_weather", {})
+    dados_horarios = dados.get("hourly", {})
+    indice = encontrar_indice_hora_atual(dados_horarios, clima_atual.get("time"))
+    agora = datetime.now(FUSO_APP)
 
     try:
         return {
-            "temperatura": float(hourly["temperature_2m"][index]),
-            "umidade": float(hourly["relativehumidity_2m"][index]),
-            "pressao": float(hourly["pressure_msl"][index]),
-            "vento_velocidade": float(hourly["windspeed_10m"][index]),
-            "chuva": float(hourly["precipitation"][index]),
-            "previsao_chuva_1h": sum_precipitation(hourly, index, 1),
-            "previsao_chuva_3h": sum_precipitation(hourly, index, 3),
-            "previsao_chuva_6h": sum_precipitation(hourly, index, 6),
-            "local": neighborhood,
+            "temperatura": float(dados_horarios["temperature_2m"][indice]),
+            "umidade": float(dados_horarios["relativehumidity_2m"][indice]),
+            "pressao": float(dados_horarios["pressure_msl"][indice]),
+            "vento_velocidade": float(dados_horarios["windspeed_10m"][indice]),
+            "chuva": float(dados_horarios["precipitation"][indice]),
+            "previsao_chuva_1h": somar_precipitacao(dados_horarios, indice, 1),
+            "previsao_chuva_3h": somar_precipitacao(dados_horarios, indice, 3),
+            "previsao_chuva_6h": somar_precipitacao(dados_horarios, indice, 6),
+            "local": bairro,
             "latitude": latitude,
             "longitude": longitude,
             "fonte_localizacao": "OpenStreetMap/Overpass",
             "fonte_clima": "Open-Meteo",
-            "dia_semana": WEEKDAYS_PT[now.weekday()],
-            "hora": now.hour,
-            "timestamp": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "dia_semana": DIAS_SEMANA_PT[agora.weekday()],
+            "hora": agora.hour,
+            "timestamp": agora.strftime("%Y-%m-%d %H:%M:%S"),
         }
-    except (KeyError, IndexError, TypeError, ValueError) as error:
-        print(f"Resposta inesperada da Open-Meteo: {error}")
+    except (KeyError, IndexError, TypeError, ValueError) as erro:
+        print(f"Resposta inesperada da Open-Meteo: {erro}")
         return None
 
 
-def publish_weather(client: mqtt.Client, payload: WeatherPayload) -> bool:
-    message = json.dumps(payload)
-    result = client.publish(MQTT_TOPIC, message, retain=MQTT_RETAIN)
-    if result.rc != mqtt.MQTT_ERR_SUCCESS:
-        print(f"Falha ao publicar no MQTT. Código: {result.rc}")
+def publicar_clima(cliente: mqtt.Client, pacote: PacoteClima) -> bool:
+    mensagem = json.dumps(pacote)
+    resultado = cliente.publish(TOPICO_MQTT, mensagem, retain=RETER_MQTT)
+    if resultado.rc != mqtt.MQTT_ERR_SUCCESS:
+        print(f"Falha ao publicar no MQTT. Código: {resultado.rc}")
         return False
 
-    print(f"[SENSOR] {message}")
+    print(f"[SENSOR] {mensagem}")
     return True
 
 
-def run() -> None:
-    neighborhoods = load_dynamic_neighborhoods()
-    client = connect_mqtt()
+def executar() -> None:
+    bairros = carregar_bairros_dinamicos()
+    cliente = conectar_mqtt()
+    intervalo_publicacao = SEGUNDOS_INTERVALO_PUBLICACAO_INICIAL
 
     while True:
-        for neighborhood, (latitude, longitude) in neighborhoods.items():
-            weather = fetch_weather(neighborhood, latitude, longitude)
-            if weather:
-                publish_weather(client, weather)
+        for bairro, (latitude, longitude) in bairros.items():
+            clima = buscar_clima(bairro, latitude, longitude)
+            if clima:
+                publicar_clima(cliente, clima)
 
-            time.sleep(PUBLISH_INTERVAL_SECONDS)
+            if intervalo_publicacao > 0:
+                time.sleep(intervalo_publicacao)
+
+        intervalo_publicacao = SEGUNDOS_INTERVALO_PUBLICACAO
 
 
 if __name__ == "__main__":
-    run()
+    executar()
